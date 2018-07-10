@@ -301,9 +301,9 @@ static int qemu_init(char *path)
 	char* qemu_str = "qemu-system-x86_64";
 	char* qemu_argv[] = {qemu_str, "-daemonize", "-display", "none", "-smp", "1",
 		"-m", "2G", "-pidfile", pidname, "-net", "nic,model=rtl8139", "-net",
-		hostfwd, "-chardev", chardev_file, "-device", "pci-serial,chardev=gnc0",
+		hostfwd, "-chardev", chardev_file, "-device", "isa-serial,chardev=gnc0",
 		"-kernel", loader_path, "-initrd", path, "-append", get_append_string(),
-		"-no-acpi", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+		NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 		NULL, NULL, NULL, NULL};
 
 #ifdef __aarch64__
