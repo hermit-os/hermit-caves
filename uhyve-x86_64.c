@@ -344,7 +344,7 @@ static void setup_system_64bit(struct kvm_sregs *sregs)
 {
 	sregs->cr0 |= X86_CR0_PE;
 	sregs->cr4 |= X86_CR4_PAE;
-	sregs->efer |= EFER_LME|EFER_LMA;
+	sregs->efer |= EFER_LME|EFER_LMA|EFER_NX;
 }
 
 static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
