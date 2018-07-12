@@ -1238,6 +1238,11 @@ int load_kernel(uint8_t* mem, char* path)
 			}
 
 			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xbc)) = (uint64_t)guest_mem;
+
+			// Pass the boot time in microseconds (boot_gtod) to HermitCore-rs.
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xd4)) = (uint64_t)tv.tv_sec * 1000000;
 		}
 		*((uint64_t*) (mem+pstart-GUEST_OFFSET + 0x38)) = paddr + memsz - pstart; // total kernel size
 	}
