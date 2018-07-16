@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.7)
-project(hermit_tools)
+project(hermit_tools C)
 
 include(CheckIncludeFiles)
 include(../cmake/HermitCore-Paths.cmake)
