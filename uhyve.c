@@ -118,6 +118,11 @@ typedef struct {
 	char **envp;
 } __attribute__ ((packed)) uhyve_cmdval_t;
 
+static inline size_t min(const size_t a, const size_t b)
+{
+	return (a < b ? a : b);
+}
+
 static uint64_t memparse(const char *ptr)
 {
 	// local pointer to end of parsed string
@@ -344,15 +349,49 @@ static int vcpu_loop(void)
 				break;
 			case UHYVE_PORT_WRITE: {
 					uhyve_write_t* uhyve_write = (uhyve_write_t*) (guest_mem+raddr);
+					size_t bytes_to_write = uhyve_write->len;
+					size_t bytes_written = 0;
 
-					uhyve_write->len = write(uhyve_write->fd, guest_mem+(size_t)uhyve_write->buf, uhyve_write->len);
+					while (bytes_to_write > 0)
+					{
+						size_t physical_address;
+						size_t physical_address_end;
+						virt_to_phys((size_t)uhyve_write->buf + bytes_written, &physical_address, &physical_address_end);
+
+						size_t bytes_to_write_step = min(physical_address_end - physical_address, bytes_to_write);
+						size_t bytes_written_step = write(uhyve_write->fd, guest_mem+physical_address, bytes_to_write_step);
+						bytes_written += bytes_written_step;
+						if (bytes_written_step < bytes_to_write_step)
+							break;
+
+						bytes_to_write -= bytes_to_write_step;
+					}
+
+					uhyve_write->len = bytes_written;
 					break;
 				}
 
 			case UHYVE_PORT_READ: {
 					uhyve_read_t* uhyve_read = (uhyve_read_t*) (guest_mem+raddr);
+					size_t bytes_to_read = uhyve_read->len;
+					size_t bytes_read = 0;
 
-					uhyve_read->ret = read(uhyve_read->fd, guest_mem+(size_t)uhyve_read->buf, uhyve_read->len);
+					while (bytes_to_read > 0)
+					{
+						size_t physical_address;
+						size_t physical_address_end;
+						virt_to_phys((size_t)uhyve_read->buf + bytes_read, &physical_address, &physical_address_end);
+
+						size_t bytes_to_read_step = min(physical_address_end - physical_address, bytes_to_read);
+						size_t bytes_read_step = read(uhyve_read->fd, guest_mem+physical_address, bytes_to_read_step);
+						bytes_read += bytes_read_step;
+						if (bytes_read_step < bytes_to_read_step)
+							break;
+
+						bytes_to_read -= bytes_to_read_step;
+					}
+
+					uhyve_read->ret = bytes_read;
 					break;
 				}
 
