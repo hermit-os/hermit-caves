@@ -193,6 +193,7 @@
 #define PHYS_BITS			52
 #define VIRT_BITS			48
 #define PAGE_MAP_BITS	9
+#define PAGE_MAP_MASK	0x1FF
 #define PAGE_LEVELS		4
 
 #define IOAPIC_DEFAULT_BASE	0xfec00000
@@ -1251,5 +1252,51 @@ out:
 	close(fd);
 
 	return ret;
+}
+
+static void virt_to_phys_for_table(
+	const size_t virtual_address,
+	size_t* const physical_address,
+	size_t* const physical_address_page_end,
+	size_t* const table,
+	const size_t level
+)
+{
+	const size_t index = virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
+	const size_t page_mask = ((~0UL) << PAGE_BITS << level * PAGE_MAP_BITS) & ~PG_XD;
+	const size_t page_size = PAGE_SIZE << level * PAGE_MAP_BITS;
+
+	if (table[index] & PG_PRESENT)
+	{
+		if (level == 0 || (level < 3 && table[index] & PG_PSE))
+		{
+			const size_t phy = table[index] & page_mask;
+			const size_t off = virtual_address & ~page_mask;
+
+			*physical_address = phy | off;
+			*physical_address_page_end = phy + page_size;
+		}
+		else
+		{
+			const size_t phy = table[index] & PAGE_MASK;
+			size_t* const subtable = (size_t*) (guest_mem+phy);
+
+			virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, subtable, level - 1);
+		}
+	}
+}
+
+void virt_to_phys(
+	const size_t virtual_address,
+	size_t* const physical_address,
+	size_t* const physical_address_page_end
+)
+{
+	size_t* const pml4 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
+
+	*physical_address = 0;
+	*physical_address_page_end = 0;
+
+	virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, pml4, 3);
 }
 #endif
