@@ -83,9 +83,15 @@
 #define ARM_CPU_ID		3, 0, 0, 0
 #define ARM_CPU_ID_MPIDR	5
 
+/* Used to walk the page table */
+#define PT_ADDR_MASK		0xFFFFFFFFF000
+
 static bool cap_irqfd = false;
 static bool cap_read_only = false;
 static int gic_fd = -1;
+
+static uint64_t static_mem_size = 0;
+static uint64_t static_mem_start = 0;
 
 extern size_t guest_size;
 extern uint64_t elf_entry;
@@ -99,6 +105,42 @@ extern uint8_t* mboot;
 extern __thread struct kvm_run *run;
 extern __thread int vcpufd;
 extern __thread uint32_t cpuid;
+
+/* Walk the guest page table to translate a guest virtual into a guest physical
+ * address. This works only for 4KB granule and 4KB pages */
+uint64_t aarch64_virt_to_phys(uint64_t vaddr) {
+	uint64_t pt0_index, pt1_index, pt2_index, pt3_index, paddr;
+	uint64_t *pt0_addr, *pt1_addr, *pt2_addr, *pt3_addr;
+
+	/* There is a direct virt to phys mapping for all the static memory, so
+	 * we can take the quick path here. This is especially helpful when initial
+	 * breakpoints are set (when the debugger connects before the guest starts
+	 * to execute) as the page table is not installed yet and thus it is not
+	 * possible to do a manual walk */
+	if(vaddr >= static_mem_start && vaddr < (static_mem_start + static_mem_size))
+		return vaddr;
+
+	/* Compute index in level 0 PT: bits 39 to 47 */
+	pt0_index = (vaddr & 0xFF8000000000) >> 39;
+	/* Compute index in level 1 PT: bits 30 to 38 */
+	pt1_index = (vaddr & 0x7FC0000000) >> 30;
+	/* Compute index in level 2 PT: bits 21 to 29 */
+	pt2_index = (vaddr & 0x3FE00000) >> 21;
+	/* Compute index in level 3 PT: bits 12 to 20 */
+	pt3_index = (vaddr & 0x1FF000) >> 12;
+
+	/* Now find page table addresses at each level */
+	pt0_addr = (uint64_t *)((0x201000ULL + (uint64_t)guest_mem) & PT_ADDR_MASK);
+	pt1_addr = (uint64_t *)((pt0_addr[pt0_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
+	pt2_addr = (uint64_t *)((pt1_addr[pt1_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
+	pt3_addr = (uint64_t *)((pt2_addr[pt2_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
+
+	/* last level page table gives us the physical page and we add the offset */
+	paddr = pt3_addr[pt3_index] & PT_ADDR_MASK;
+	paddr = paddr | (vaddr & 0xFFF);
+
+	return paddr;
+}
 
 void print_registers(void)
 {
@@ -266,6 +308,46 @@ void init_cpu_state(uint64_t elf_entry)
 	*((volatile uint32_t*) (mboot + 0x130)) = cpuid;
 }
 
+/* Return 1 if guest fiqs are enabled, 0 if the aren't */
+int get_fiq_status(void) {
+	struct kvm_one_reg reg;
+	uint64_t data;
+	reg.addr = (uint64_t)&data;
+
+	reg.id = ARM64_CORE_REG(regs.pstate);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+
+	return (data & PSR_F_BIT) ? 1 : 0;
+}
+
+/* disable guest fiqs */
+void mask_fiqs(void) {
+	struct kvm_one_reg reg;
+	uint64_t data;
+	reg.addr = (uint64_t)&data;
+
+	reg.id = ARM64_CORE_REG(regs.pstate);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+
+	data |= PSR_F_BIT;
+
+	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+}
+
+/* Enable guest fiqs */
+void unmask_fiqs(void) {
+	struct kvm_one_reg reg;
+	uint64_t data;
+	reg.addr = (uint64_t)&data;
+
+	reg.id = ARM64_CORE_REG(regs.pstate);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+
+	data &= ~PSR_F_BIT;
+
+	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+}
+
 void init_kvm_arch(void)
 {
 	guest_mem = mmap(NULL, guest_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -429,6 +511,13 @@ int load_kernel(uint8_t* mem, char* path)
 			continue;
 
 		//fprintf(stderr, "Kernel location 0x%zx, file size 0x%zx, memory size 0x%zx\n", paddr, filesz, memsz);
+
+		/* if it's not the TLS segment, then it is the only other segment: the
+		 * kernel, which is what we want here */
+		if (phdr[ph_i].p_type != PT_TLS) {
+			static_mem_size = memsz;
+			static_mem_start = paddr;
+		}
 
 		ret = pread_in_full(fd, mem+paddr-GUEST_OFFSET, filesz, offset);
 		if (ret < 0)
