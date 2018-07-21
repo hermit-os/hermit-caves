@@ -52,4 +52,10 @@ typedef struct {
 	int whence;
 } __attribute__((packed)) uhyve_lseek_t;
 
+typedef struct {
+	uint64_t rip;
+	uint64_t addr;
+	int success;
+} __attribute__ ((packed)) uhyve_pfault_t;
+
 #endif // UHYVE_SYSCALLS_H

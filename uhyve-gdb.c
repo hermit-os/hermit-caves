@@ -28,7 +28,6 @@
  * Not copyrighted.
  */
 
-#ifdef __x86_64__
 #define _GNU_SOURCE
 
 #include <stdio.h>
@@ -54,12 +53,30 @@
 #include "uhyve-gdb.h"
 #include "queue.h"
 
+/* This is the trap instruction used for software breakpoints. */
+#ifdef __aarch64__
+#ifndef offsetof
+#define offsetof(TYPE, MEMBER)	((size_t) &((TYPE *)0)->MEMBER)
+#endif
+#define ARM64_CORE_REG(x)	(KVM_REG_ARM64 | KVM_REG_SIZE_U64 |\
+				 KVM_REG_ARM_CORE | KVM_REG_ARM_CORE_REG(x))
+
+static const uint32_t brk_1 = 0xd4200020;
+#else
+/* This is the trap instruction used for software breakpoints. */
+static const uint8_t int3 = 0xcc;
+#endif
+
 struct breakpoint_t {
 	gdb_breakpoint_type type;
 	uint64_t addr;
 	size_t len;
 	uint32_t refcount;
+#ifdef __aarch64__
+	uint32_t saved_insn;
+#else
 	uint8_t saved_insn;	/* for software breakpoints */
+#endif
 
 	SLIST_ENTRY(breakpoint_t) entries;
 };
@@ -74,8 +91,6 @@ static uint32_t nr_hw_breakpoints = 0;
 
 /* Stepping is disabled by default. */
 static bool stepping = false;
-/* This is the trap instruction used for software breakpoints. */
-static const uint8_t int3 = 0xcc;
 
 static int socket_fd = 0;
 static int portno = 1234;	/* Default port number */
@@ -95,6 +110,8 @@ void *uhyve_checked_gpa_p(uint64_t gpa, size_t sz, uint8_t * chk_guest_mem,
 
 /* The actual error code is ignored by GDB, so any number will do. */
 #define GDB_ERROR_MSG                  "E01"
+
+extern uint64_t aarch64_virt_to_phys(uint64_t vaddr);
 
 static int hex(unsigned char ch)
 {
@@ -174,7 +191,7 @@ static int wait_for_connect(void)
 		return -1;
 	}
 
-	if (listen(listen_socket_fd, 0) == -1) {
+	if (listen(listen_socket_fd, 128) == -1) {
 		err(1, "listen failed");
 		return -1;
 	}
@@ -662,8 +679,16 @@ void uhyve_gdb_handle_term(void)
 
 static int kvm_arch_insert_sw_breakpoint(struct breakpoint_t *bp)
 {
+#ifdef __aarch64__
+	uint32_t *insn = (uint32_t *)(bp->addr + guest_mem);
+#else
 	uint8_t *insn = bp->addr + guest_mem;
+#endif
 	bp->saved_insn = *insn;
+
+#ifdef __aarch64__
+	*insn = brk_1;
+#else
 	/*
 	 * We just modify the first byte even if the instruction is multi-byte.
 	 * The debugger keeps track of the length of the instruction. The
@@ -671,13 +696,19 @@ static int kvm_arch_insert_sw_breakpoint(struct breakpoint_t *bp)
 	 * NOP's.
 	 */
 	*insn = int3;
+#endif
 	return 0;
 }
 
 static int kvm_arch_remove_sw_breakpoint(struct breakpoint_t *bp)
 {
+#ifdef __aarch64__
+	uint32_t *insn = (uint32_t *)(bp->addr + guest_mem);
+	assert(*insn == brk_1);
+#else
 	uint8_t *insn = bp->addr + guest_mem;
 	assert(*insn == int3);
+#endif
 	*insn = bp->saved_insn;
 	return 0;
 }
@@ -713,6 +744,7 @@ static int uhyve_gdb_update_guest_debug(int vcpufd)
 	if (!SLIST_EMPTY(&sw_breakpoints))
 		dbg.control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP;
 
+#ifdef __x86_64__
 	if (!SLIST_EMPTY(&hw_breakpoints)) {
 		dbg.control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_HW_BP;
 
@@ -734,6 +766,7 @@ static int uhyve_gdb_update_guest_debug(int vcpufd)
 			n++;
 		}
 	}
+#endif
 
 	kvm_ioctl(vcpufd, KVM_SET_GUEST_DEBUG, &dbg);
 
@@ -860,18 +893,46 @@ static int bp_list_remove(gdb_breakpoint_type type, uint64_t addr, size_t len)
 
 int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 {
-	struct kvm_regs kregs;
-	struct kvm_sregs sregs;
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
 	int ret;
-
-	kvm_ioctl(vcpufd, KVM_GET_REGS, &kregs);
-	kvm_ioctl(vcpufd, KVM_GET_SREGS, &sregs);
 
 	if (*len < sizeof(struct uhyve_gdb_regs))
 		return -1;
 
 	*len = sizeof(struct uhyve_gdb_regs);
+
+#ifdef __aarch64__
+	/* There is no KVM_GET_REGS for aarch64, so we need to grab the registers
+	 * one by one */
+	struct kvm_one_reg reg;
+	uint64_t data;
+	uint32_t data32;
+
+	reg.addr = (uint64_t)&data32;
+	reg.id = ARM64_CORE_REG(regs.pstate);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+	gregs->cpsr = data32;
+
+	reg.addr = (uint64_t)&data;
+	reg.id = ARM64_CORE_REG(regs.pc);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+	gregs->pc = data;
+
+	reg.id = ARM64_CORE_REG(sp_el1);
+	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+	gregs->sp = data;
+
+	for(int i=0; i<31; i++) {
+		reg.id = ARM64_CORE_REG(regs.regs[i]);
+		kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
+		gregs->x[i] = data;
+	}
+#else /* x86-64 */
+	struct kvm_regs kregs;
+	struct kvm_sregs sregs;
+
+	kvm_ioctl(vcpufd, KVM_GET_REGS, &kregs);
+	kvm_ioctl(vcpufd, KVM_GET_SREGS, &sregs);
 
 	gregs->rax = kregs.rax;
 	gregs->rbx = kregs.rbx;
@@ -897,23 +958,51 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 	gregs->es = sregs.es.selector;
 	gregs->fs = sregs.fs.selector;
 	gregs->gs = sregs.gs.selector;
+#endif
 
 	return 0;
 }
 
 int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
 {
-	struct kvm_regs kregs;
-	struct kvm_sregs sregs;
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
 	int ret;
+
+	if (len < sizeof(struct uhyve_gdb_regs))
+		return -1;
+
+#ifdef __aarch64__
+	struct kvm_one_reg reg;
+	uint64_t data;
+	uint32_t data32;
+	reg.addr = (uint64_t)&data32;
+
+	reg.id = ARM64_CORE_REG(regs.pstate);
+	data32 = gregs->cpsr;
+	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+
+	reg.addr = (uint64_t)&data;
+
+	reg.id = ARM64_CORE_REG(regs.pc);
+	data = gregs->pc;
+	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+
+	reg.id = ARM64_CORE_REG(sp_el1);
+	data = gregs->sp;
+	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+
+	for(int i=0; i<31; i++) {
+		reg.id = ARM64_CORE_REG(regs.regs[i]);
+		data = gregs->x[i];
+		kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
+	}
+#else /* x86-64 */
+	struct kvm_regs kregs;
+	struct kvm_sregs sregs;
 
 	/* Let's read all registers just in case we miss filling one of them. */
 	kvm_ioctl(vcpufd, KVM_GET_REGS, &kregs);
 	kvm_ioctl(vcpufd, KVM_GET_SREGS, &sregs);
-
-	if (len < sizeof(struct uhyve_gdb_regs))
-		return -1;
 
 	kregs.rax = gregs->rax;
 	kregs.rbx = gregs->rbx;
@@ -943,6 +1032,7 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
 
 	kvm_ioctl(vcpufd, KVM_SET_REGS, &kregs);
 	kvm_ioctl(vcpufd, KVM_SET_SREGS, &sregs);
+#endif
 
 	return 0;
 }
@@ -960,6 +1050,11 @@ int uhyve_gdb_add_breakpoint(int vcpufd, gdb_breakpoint_type type,
 	bp = bp_list_insert(type, addr, len);
 	if (bp == NULL)
 		return -1;
+
+#ifdef __aarch64__
+	if(type != GDB_BREAKPOINT_SW)
+		return -1;
+#endif
 
 	if (type == GDB_BREAKPOINT_SW)
 		kvm_arch_insert_sw_breakpoint(bp);
@@ -1015,13 +1110,15 @@ int uhyve_gdb_disable_ss(int vcpufd)
 /* Convert a guest virtual address into the correspondign physical address */
 int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt, uint64_t * phys)
 {
+#ifdef __aarch64__
+	*phys = aarch64_virt_to_phys(virt);
+#else
 	struct kvm_translation kt;
 
 	kt.linear_address = virt;
 	kvm_ioctl(vcpufd, KVM_TRANSLATE, &kt);
 
 	*phys = kt.physical_address;
+#endif
 	return 0;
 }
-
-#endif
