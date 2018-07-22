@@ -72,8 +72,6 @@
 #define KVM_GAP_SIZE		(GIC_SIZE)
 #define KVM_GAP_START		GICD_BASE
 
-#define PAGE_SIZE		0x1000
-
 #ifndef offsetof
 #define offsetof(TYPE, MEMBER)		((size_t) &((TYPE *)0)->MEMBER)
 #endif
@@ -85,6 +83,13 @@
 
 /* Used to walk the page table */
 #define PT_ADDR_MASK		0xFFFFFFFFF000
+
+/// Page offset bits
+#define PAGE_BITS			12
+#define PAGE_SIZE			(1L << PAGE_BITS)
+#define PAGE_MASK			(((~0UL) << PAGE_BITS))
+#define PAGE_MAP_BITS			9
+#define PAGE_MAP_MASK			0x1FF
 
 static bool cap_irqfd = false;
 static bool cap_read_only = false;
@@ -130,7 +135,7 @@ uint64_t aarch64_virt_to_phys(uint64_t vaddr) {
 	pt3_index = (vaddr & 0x1FF000) >> 12;
 
 	/* Now find page table addresses at each level */
-	pt0_addr = (uint64_t *)((0x201000ULL + (uint64_t)guest_mem) & PT_ADDR_MASK);
+	pt0_addr = (uint64_t *)((elf_entry+PAGE_SIZE+(uint64_t)guest_mem) & PT_ADDR_MASK);
 	pt1_addr = (uint64_t *)((pt0_addr[pt0_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
 	pt2_addr = (uint64_t *)((pt1_addr[pt1_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
 	pt3_addr = (uint64_t *)((pt2_addr[pt2_index] & PT_ADDR_MASK) + (uint64_t)guest_mem);
@@ -140,6 +145,50 @@ uint64_t aarch64_virt_to_phys(uint64_t vaddr) {
 	paddr = paddr | (vaddr & 0xFFF);
 
 	return paddr;
+}
+
+static void virt_to_phys_for_table(
+	const size_t virtual_address,
+	size_t* const physical_address,
+	size_t* const physical_address_page_end,
+	size_t* const table,
+	const size_t level
+)
+{
+	const size_t index = virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
+	const size_t page_mask = ((~0ULL) << PAGE_BITS << level * PAGE_MAP_BITS) & 0xFFFFFFFFFFFFULL;
+	const size_t page_size = PAGE_SIZE << level * PAGE_MAP_BITS;
+
+	if (table[index])
+	{
+		if (level == 0)
+		{
+			const size_t phy = table[index] & page_mask;
+			const size_t off = (virtual_address & ~page_mask) & 0xFFFFFFFFFFFFULL;
+
+			*physical_address = phy | off;
+			*physical_address_page_end = phy + page_size;
+		} else {
+			const size_t phy = table[index] & PT_ADDR_MASK;
+			size_t* const subtable = (size_t*) (guest_mem+phy);
+
+			virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, subtable, level - 1);
+		}
+	}
+}
+
+void virt_to_phys(
+	const size_t virtual_address,
+	size_t* const physical_address,
+	size_t* const physical_address_page_end
+)
+{
+	size_t* const pl0 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
+
+	*physical_address = 0;
+	*physical_address_page_end = 0;
+
+	virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, pl0, 3);
 }
 
 void print_registers(void)
