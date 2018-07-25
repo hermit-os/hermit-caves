@@ -471,7 +471,9 @@ void init_kvm_arch(void)
 	gic_fd = gic_device.fd;
 	kvm_ioctl(gic_fd, KVM_SET_DEVICE_ATTR, &cpu_if_attr);
 	kvm_ioctl(gic_fd, KVM_SET_DEVICE_ATTR, &dist_attr);
-#else
+#endif
+
+#if 0
 	/* Create interrupt controller GICv2 */
 	struct kvm_arm_device_addr gic_addr[] = {
 		[0] = {
@@ -588,7 +590,7 @@ int load_kernel(uint8_t* mem, char* path)
 			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x130)) = 0; // cpuid
 			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x148)) = 1; // announce uhyve
 
-
+#if 0
 			char* str = getenv("HERMIT_IP");
 			if (str) {
 				uint32_t ip[4];
@@ -622,8 +624,14 @@ int load_kernel(uint8_t* mem, char* path)
 			}
 
 			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xbc)) = (uint64_t) guest_mem;
+#endif
 			if (verbose)
 				*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x174)) = (uint32_t) UHYVE_UART_PORT;
+
+			// Pass the boot time in microseconds (boot_gtod) to HermitCore-rs.
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x18c)) = (uint64_t)tv.tv_sec * 1000000;
 		}
 		*((uint64_t*) (mem+pstart-GUEST_OFFSET + 0x158)) = paddr + memsz - pstart; // total kernel size
 	}
