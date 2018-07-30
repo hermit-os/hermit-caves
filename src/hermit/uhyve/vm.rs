@@ -467,7 +467,7 @@ impl VirtualMachine {
 
     pub fn init_sregs(&mut self, mut sregs: &mut kvm_sregs) -> Result<()> {
         debug!("Setup GDT");
-        self.setup_system_gdt(&mut sregs, 0)?;
+        self.setup_system_gdt(&mut sregs, BOOT_GDT as u64)?;
         debug!("Setup the page tables");
         self.setup_system_page_tables(&mut sregs)?;
         debug!("Set the system to 64bit");
