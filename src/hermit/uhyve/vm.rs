@@ -19,7 +19,6 @@ use libc;
 use memmap::{Mmap, MmapMut};
 use elf;
 use elf::types::{ELFCLASS64, OSABI, PT_LOAD, ET_EXEC, EM_X86_64};
-use byteorder::{ReadBytesExt, NativeEndian};
 use chan_signal::Signal;
 use nix::sys::pthread;
 
@@ -35,10 +34,9 @@ use super::checkpoint::{CheckpointConfig, FileCheckpoint};
 use super::migration::{MigrationServer, MigrationClient};
 use super::network::NetworkInterface;
 use super::gdt;
+use super::paging::*;
 
-// TODO configuration missing
 pub const GUEST_SIZE: usize = 0x20000000;
-pub const GUEST_PAGE_SIZE: usize = 0x200000;
 
 pub const BOOT_GDT:  usize = 0x1000;
 pub const BOOT_INFO: usize = 0x2000;
@@ -79,53 +77,6 @@ pub const EFER_FFXSR:   u64 = (1<<_EFER_FFXSR);
 pub const KVM_32BIT_MAX_MEM_SIZE:   usize = 1 << 32;
 pub const KVM_32BIT_GAP_SIZE:       usize = 768 << 20;
 pub const KVM_32BIT_GAP_START:      usize = KVM_32BIT_MAX_MEM_SIZE - KVM_32BIT_GAP_SIZE;
-
-/// Page offset bits
-pub const PAGE_BITS:        usize = 12;
-pub const PAGE_2M_BITS:     usize = 21;
-pub const PAGE_SIZE:        usize = 1 << PAGE_BITS;
-/// Mask the page address without page map flags and XD flag
-
-pub const PAGE_MASK:        u32 = ((!0u64) << PAGE_BITS) as u32 & !PG_XD;
-pub const PAGE_2M_MASK:     u32 = ((!0u64) << PAGE_2M_BITS) as u32 & !PG_XD;
-
-// Page is present
-pub const PG_PRESENT:	    u32 = 1 << 0;
-// Page is read- and writable
-pub const PG_RW:			u32 = 1 << 1;
-// Page is addressable from userspace
-pub const PG_USER:			u32 = 1 << 2;
-// Page write through is activated
-pub const PG_PWT:			u32 = 1 << 3;
-// Page cache is disabled
-pub const PG_PCD:			u32 = 1 << 4;
-// Page was recently accessed (set by CPU)
-pub const PG_ACCESSED:		u32 = 1 << 5;
-// Page is dirty due to recent write-access (set by CPU)
-pub const PG_DIRTY:		    u32 = 1 << 6;
-// Huge page: 4MB (or 2MB, 1GB)
-pub const PG_PSE:			u32 = 1 << 7;
-// Page attribute table
-pub const PG_PAT:			u32 = PG_PSE;
-
-/* @brief Global TLB entry (Pentium Pro and later)
- *
- * HermitCore is a single-address space operating system
- * => CR3 never changed => The flag isn't required for HermitCore
- */
-pub const PG_GLOBAL:	    u32 = 0;
-
-// This table is a self-reference and should skipped by page_map_copy()
-pub const PG_SELF:			u32 = 1 << 9;
-
-/// Disable execution for this page
-pub const PG_XD:            u32 = 0; //(1u32 << 63);
-
-pub const BITS:             usize = 64;
-pub const PHYS_BITS:        usize = 52;
-pub const VIRT_BITS:        usize = 48;
-pub const PAGE_MAP_BITS:    usize = 9;
-pub const PAGE_LEVELS:      usize = 4;
 
 #[derive(Default, Clone)]
 pub struct KVMExtensions {
@@ -332,12 +283,11 @@ impl VirtualMachine {
 
                 let _ = self.set_clock(data);
             }
-
-            while let Ok(location) = file.read_i64::<NativeEndian>() {
-                let location = location as isize;
-                let mask = if location & PG_PSE as isize != 0 { PAGE_2M_MASK } else { PAGE_MASK };
-                let dest_addr = unsafe { self.mem.as_mut_ptr().offset(location & mask as isize) };
-                let len = if location & PG_PSE as isize != 0 { 1 << PAGE_2M_BITS } else { 1 << PAGE_BITS };
+            
+            let mut location: PageTableEntry = unsafe { ::std::mem::uninitialized() };
+            while let Ok(()) = VirtualMachine::read_page_table_entry(&mut file, &mut location) {
+                let dest_addr = unsafe { self.mem.as_mut_ptr().offset(location.address() as isize) };
+                let len = if location.is_hugepage() { LargePageSize::SIZE } else { BasePageSize::SIZE };
                 let dest = unsafe { ::std::slice::from_raw_parts_mut(dest_addr, len) };
                 file.read_exact(dest).map_err(|_| Error::InvalidFile(file_name.clone()))?;
             }
@@ -348,6 +298,11 @@ impl VirtualMachine {
         debug!("Loaded checkpoint {}", chk_num);
 
         Ok(())
+    }
+
+    fn read_page_table_entry(file: &mut File, loc: &mut PageTableEntry) -> ::std::io::Result<()> {
+        let loc_data = unsafe { utils::any_as_u8_mut_slice(loc) };
+        file.read_exact(loc_data)
     }
 
     pub fn load_migration(&mut self, mig: &mut MigrationServer) -> Result<()> {
@@ -512,19 +467,20 @@ impl VirtualMachine {
     pub fn setup_system_page_tables(&mut self, sregs: &mut kvm_sregs) -> Result<()> {
         unsafe {
             let mem = self.mem.as_mut_ptr();
-            let pml4 = mem.offset(BOOT_PML4 as isize) as *mut u64;
-            let pdpte = mem.offset(BOOT_PDPTE as isize) as *mut u64;
-            let pde = mem.offset(BOOT_PDE as isize) as *mut u64;
+            let pml4 = &mut *(mem.offset(BOOT_PML4 as isize) as *mut PageTable);
+            let pdpte = &mut *(mem.offset(BOOT_PDPTE as isize) as *mut PageTable);
+            let pde = &mut *(mem.offset(BOOT_PDE as isize) as *mut PageTable);
+
+            utils::memzero(pml4);
+            utils::memzero(pdpte);
+            utils::memzero(pde);
             
-            libc::memset(pml4 as *mut libc::c_void, 0x00, 4096);
-            libc::memset(pdpte as *mut libc::c_void, 0x00, 4096);
-            libc::memset(pde as *mut libc::c_void, 0x00, 4096);
-            
-            *pml4 = (BOOT_PDPTE as u64) | (X86_PDPT_P | X86_PDPT_RW);
-            *pdpte = (BOOT_PDE as u64) | (X86_PDPT_P | X86_PDPT_RW);
+            pml4.entries[0].set(BOOT_PDPTE, PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE);
+            pdpte.entries[0].set(BOOT_PDE, PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE);
            
-            for i in 0..(GUEST_SIZE/GUEST_PAGE_SIZE) {
-                *(pde.offset(i as isize)) = (i*GUEST_PAGE_SIZE) as u64 | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
+            for i in 0 .. GUEST_SIZE / LargePageSize::SIZE {
+                pdpte.entries[i].set(i * LargePageSize::SIZE,
+                    PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE | PageTableEntryFlags::HUGE_PAGE);
             }
         }
 
@@ -675,64 +631,67 @@ impl VirtualMachine {
 
     fn scan_page_tables(&mut self, mut file: File) -> Result<()> {
         let flag = if !self.additional.full_checkpoint && self.checkpoint_num > 0 {
-            PG_DIRTY
+            PageTableEntryFlags::DIRTY
         } else {
-            PG_ACCESSED
-        } as isize;
+            PageTableEntryFlags::ACCESSED
+        };
 
         let mem_ptr = self.mem.as_mut_ptr();
-        const PAGE_MAP_SIZE: usize = 1 << PAGE_MAP_BITS;
+        let entry = self.elf_entry.ok_or(Error::KernelNotLoaded)? as isize;
 
-        unsafe {
-            let plm4_ptr = mem_ptr.offset(self.elf_entry.ok_or(Error::KernelNotLoaded)? as isize + PAGE_SIZE as isize) as *const isize;
-            let plm4 = ::std::slice::from_raw_parts(plm4_ptr, PAGE_MAP_SIZE);
-            for plm4_i in plm4 {
-                if (*plm4_i & PG_PRESENT as isize) != PG_PRESENT as isize {
+        let pml4 = unsafe { &mut *(mem_ptr.offset(entry + BasePageSize::SIZE as isize) as *mut PageTable) };
+        for pml4e in pml4.entries.iter() {
+            if !pml4e.is_present() {
+                continue;
+            }
+
+            let pdpt = unsafe { &mut *(mem_ptr.offset(pml4e.address() as isize) as *mut PageTable) };
+            for pdpte in pdpt.entries.iter() {
+                if !pdpte.is_present() {
                     continue;
                 }
 
-                let pdpt_ptr = mem_ptr.offset(*plm4_i & PAGE_MASK as isize) as *const isize;
-                let pdpt = ::std::slice::from_raw_parts(pdpt_ptr, PAGE_MAP_SIZE);
-                for pdpt_j in pdpt {
-                    if (*pdpt_j & PG_PRESENT as isize) != PG_PRESENT as isize {
+                let pgd = unsafe { &mut *(mem_ptr.offset(pdpte.address() as isize) as *mut PageTable) };
+                for pgde in pgd.entries.iter_mut() {
+                    if !pgde.is_present() {
                         continue;
                     }
 
-                    let pgd_ptr = mem_ptr.offset(*pdpt_j & PAGE_MASK as isize) as *mut isize;
-                    let pgd = ::std::slice::from_raw_parts_mut(pgd_ptr, PAGE_MAP_SIZE);
-                    for pgd_k in pgd {
-                        if (*pgd_k & PG_PRESENT as isize) != PG_PRESENT as isize {
-                            continue;
-                        }
+                    if !pgde.is_hugepage() {
+                        let pgt = unsafe { &mut *(mem_ptr.offset(pgde.address() as isize) as *mut PageTable) };
+                        for pgte in pgt.entries.iter_mut() {
+                            if pgte.check_flags(PageTableEntryFlags::PRESENT | flag) {
+                                if !self.additional.full_checkpoint {
+                                    let flags = pgte.flags();
+                                    pgte.set_flags(flags & !(PageTableEntryFlags::DIRTY|PageTableEntryFlags::ACCESSED).bits());
+                                }
 
-                        if (*pgd_k & PG_PSE as isize) != PG_PSE as isize {
-                            let pgt_ptr = mem_ptr.offset(*pgd_k & PAGE_MASK as isize) as *mut isize;
-                            let pgt = ::std::slice::from_raw_parts_mut(pgt_ptr, PAGE_MAP_SIZE);
-                            for pgt_l in pgt {
-                                if (*pgt_l & (PG_PRESENT as isize|flag)) == (PG_PRESENT as isize|flag) as isize {
-                                    if !self.additional.full_checkpoint {
-                                        *pgt_l = *pgt_l & !(PG_DIRTY|PG_ACCESSED) as isize;
-                                    }
+                                let mut pgte_tmp = pgte.clone();
+                                let flags = pgte_tmp.flags();
+                                pgte_tmp.set_flags(flags & !PageTableEntryFlags::HUGE_PAGE.bits());
 
-                                    let pgt_entry = *pgt_l & !(PG_PSE) as isize;
-                                    let mut data = utils::any_as_u8_slice(&pgt_entry);
+                                unsafe {
+                                    let mut data = utils::any_as_u8_slice(&pgte_tmp);
                                     file.write_all(data).map_err(|_| Error::WriteCheckpoint)?;
 
-                                    let data_ptr = mem_ptr.offset(*pgt_l & PAGE_MASK as isize);
-                                    let mut data = ::std::slice::from_raw_parts(data_ptr, 1 << PAGE_BITS);
+                                    let data_ptr = mem_ptr.offset(pgte.address() as isize);
+                                    let mut data = ::std::slice::from_raw_parts(data_ptr, BasePageSize::SIZE);
                                     file.write_all(data).map_err(|_| Error::WriteCheckpoint)?;
                                 }
                             }
-                        } else if (*pgd_k & flag) == flag {
-                            if !self.additional.full_checkpoint {
-                                *pgd_k = *pgd_k & !(PG_DIRTY|PG_ACCESSED) as isize;
-                            }
+                        }
+                    } else if pgde.check_flags(flag) {
+                        if !self.additional.full_checkpoint {
+                            let flags = pgde.flags();
+                            pgde.set_flags(flags & !(PageTableEntryFlags::DIRTY|PageTableEntryFlags::ACCESSED).bits());
+                        }
 
-                            let mut data = utils::any_as_u8_slice(pgd_k);
+                        unsafe {
+                            let mut data = utils::any_as_u8_slice(pgde);
                             file.write_all(data).map_err(|_| Error::WriteCheckpoint)?;
 
-                            let data_ptr = mem_ptr.offset(*pgd_k & PAGE_2M_MASK as isize);
-                            let mut data = ::std::slice::from_raw_parts(data_ptr, 1 << PAGE_2M_BITS);
+                            let data_ptr = mem_ptr.offset(pgde.address() as isize);
+                            let mut data = ::std::slice::from_raw_parts(data_ptr, LargePageSize::SIZE);
                             file.write_all(data).map_err(|_| Error::WriteCheckpoint)?;
                         }
                     }

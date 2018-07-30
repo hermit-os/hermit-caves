@@ -21,6 +21,10 @@ pub unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
     )
 }
 
+pub unsafe fn memzero<T: Sized>(p: &mut T) {
+    ::libc::memset((p as *mut T) as *mut ::libc::c_void, 0x00, ::std::mem::size_of::<T>());
+}
+
 /// Returns the CPU frequency
 pub fn cpufreq() -> Result<u32> {
     let cpuid = CpuId::new();

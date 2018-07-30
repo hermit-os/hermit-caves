@@ -15,6 +15,9 @@ extern crate raw_cpuid;
 extern crate rand;
 
 #[macro_use]
+extern crate bitflags;
+
+#[macro_use]
 extern crate chan;
 extern crate chan_signal;
 

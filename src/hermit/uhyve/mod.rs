@@ -8,6 +8,7 @@ mod vm;
 mod proto;
 mod network;
 mod net_if;
+mod paging;
 
 pub mod migration;
 pub mod uhyve;
