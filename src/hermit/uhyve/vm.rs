@@ -373,7 +373,8 @@ impl VirtualMachine {
             self.set_user_memory_region(kvm_region)?;
 
             kvm_region.slot = 1;
-            kvm_region.guest_phys_addr = (KVM_32BIT_GAP_START+KVM_32BIT_GAP_SIZE) as u64;
+            kvm_region.guest_phys_addr = (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE) as u64;
+            kvm_region.userspace_addr = self.mem.as_ptr() as u64 + (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE) as u64;
             kvm_region.memory_size = (self.mem_size() - KVM_32BIT_GAP_SIZE - KVM_32BIT_GAP_START) as u64;
             self.set_user_memory_region(kvm_region)?;
         }
