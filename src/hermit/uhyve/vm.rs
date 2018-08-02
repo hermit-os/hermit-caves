@@ -21,6 +21,7 @@ use elf;
 use elf::types::{ELFCLASS64, OSABI, PT_LOAD, ET_EXEC, EM_X86_64};
 use chan_signal::Signal;
 use nix::sys::pthread;
+use nix::sys::mman::{madvise, MmapAdvise};
 
 use hermit::is_verbose;
 use hermit::IsleParameterUhyve;
@@ -126,13 +127,19 @@ impl VirtualMachine {
         }
 
         if add.mergable {
-            unsafe { libc::madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), libc::MADV_MERGEABLE); }
-            debug!("VM uses KSN feature \"mergeable\" to reduce the memory footprint.");
+            unsafe {
+                if madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), MmapAdvise::MADV_MERGEABLE).is_ok() {
+                    debug!("Uhyve uses KSN feature \"mergeable\" to reduce the memory footprint.");
+                }
+            }
         }
 
         if add.hugepage {
-            unsafe { libc::madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), libc::MADV_HUGEPAGE); }
-            debug!("VM uses huge pages to improve the performance.");
+            unsafe {
+                if madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), MmapAdvise::MADV_HUGEPAGE).is_ok() {
+                    debug!("Uhyve uses huge pages to improve the performance.");
+                }
+            }
         }
 
         let control = ControlData {
