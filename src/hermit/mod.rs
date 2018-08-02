@@ -100,7 +100,7 @@ impl IsleParameter {
                 let migration_support = IsleParameter::parse_ip("HERMIT_MIGRATION_SUPPORT");
                 let migration_type = env::var("HERMIT_MIGRATION_TYPE").map(|x| x.parse::<MigrationType>().map(|x| Some(x)).unwrap_or(None)).unwrap_or(None);
                 let migration_server = IsleParameter::parse_bool("HERMIT_MIGRATION_SERVER", false);
-                let hugepage = IsleParameter::parse_bool("HERMIT_HUGEPAGE", false);
+                let hugepage = IsleParameter::parse_bool("HERMIT_HUGEPAGE", true);
                 let mergable = IsleParameter::parse_bool("HERMIT_MERGEABLE", false);
 
                 IsleParameter::UHyve {
