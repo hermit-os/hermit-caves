@@ -184,13 +184,12 @@ impl VirtualMachine {
         self.elf_entry = Some(file_elf.ehdr.entry);
 
         let mem_addr = self.mem.as_ptr() as u64;
+        let mem_size = self.mem.len();
 
-        // acquire the slices of the user memory and kernel file
-        let vm_mem_length = self.mem.len() as u64;
         let vm_mem = self.mem.as_mut();
-        let kernel_file  = file.as_ref();
+        let kernel_file = file.as_ref();
 
-        let mut first_load = true;
+        let mut pstart: Option<isize> = None;
 
         for header in file_elf.phdrs {
             if header.progtype != PT_LOAD {
@@ -211,56 +210,55 @@ impl VirtualMachine {
                 libc::memset(vm_mem.as_mut_ptr().offset(vm_end as isize) as *mut libc::c_void, 0x00, (header.memsz - header.filesz) as usize);
             }
 
-            let ptr = vm_mem[vm_start..vm_end].as_mut_ptr();
-
             unsafe {
-                *(ptr.offset(0x38) as *mut u64) += header.memsz; // total kernel size
+                if pstart.is_none() {
+                    pstart = Some(header.paddr as isize);
 
-                if !first_load {
-                    continue;
+                    let ptr = vm_mem.as_mut_ptr().offset(vm_start as isize);
+
+                    *(ptr.offset(0x08) as *mut u64) = header.paddr;   // physical start addr
+                    *(ptr.offset(0x10) as *mut u64) = mem_size as u64;  // physical size limit
+                    *(ptr.offset(0x18) as *mut u32) = utils::cpufreq()?; // CPU frequency
+                    *(ptr.offset(0x24) as *mut u32) = 1;              // number of used CPUs
+                    *(ptr.offset(0x30) as *mut u32) = 0;              // apicid (?)
+                    *(ptr.offset(0x60) as *mut u32) = 1;              // NUMA nodes
+                    *(ptr.offset(0x94) as *mut u32) = 1;              // announce uhyve
+                    if is_verbose() {
+                        *(ptr.offset(0x98) as *mut u64) = PORT_UART as u64;              // announce uhyve
+                    }
+
+                    if let Some(ip) = self.additional.ip {
+                        let data = ip.octets();
+                        *(ptr.offset(0xB0) as *mut u8) = data[0];
+                        *(ptr.offset(0xB1) as *mut u8) = data[1];
+                        *(ptr.offset(0xB2) as *mut u8) = data[2];
+                        *(ptr.offset(0xB3) as *mut u8) = data[3];
+                    }
+
+                    if let Some(gateway) = self.additional.gateway {
+                        let data = gateway.octets();
+                        *(ptr.offset(0xB4) as *mut u8) = data[0];
+                        *(ptr.offset(0xB5) as *mut u8) = data[1];
+                        *(ptr.offset(0xB6) as *mut u8) = data[2];
+                        *(ptr.offset(0xB7) as *mut u8) = data[3];
+                    }
+
+                    if let Some(mask) = self.additional.mask {
+                        let data = mask.octets();
+                        *(ptr.offset(0xB8) as *mut u8) = data[0];
+                        *(ptr.offset(0xB9) as *mut u8) = data[1];
+                        *(ptr.offset(0xBA) as *mut u8) = data[2];
+                        *(ptr.offset(0xBB) as *mut u8) = data[3];
+                    }
+
+                    *(ptr.offset(0xBC) as *mut u64) = mem_addr;
+
+                    self.klog = Some(ptr.offset(0x5000) as *const i8);
+                    self.mboot = Some(ptr);
                 }
 
-                first_load = false;
-
-                *(ptr.offset(0x08) as *mut u64) = header.paddr;   // physical start addr
-                *(ptr.offset(0x10) as *mut u64) = vm_mem_length;  // physical size limit
-                *(ptr.offset(0x18) as *mut u32) = utils::cpufreq()?; // CPU frequency
-                *(ptr.offset(0x24) as *mut u32) = 1;              // number of used CPUs
-                *(ptr.offset(0x30) as *mut u32) = 0;              // apicid (?)
-                *(ptr.offset(0x60) as *mut u32) = 1;              // NUMA nodes
-                *(ptr.offset(0x94) as *mut u32) = 1;              // announce uhyve
-                if is_verbose() {
-                    *(ptr.offset(0x98) as *mut u64) = PORT_UART as u64;              // announce uhyve
-                }
-
-                if let Some(ip) = self.additional.ip {
-                    let data = ip.octets();
-                    *(ptr.offset(0xB0) as *mut u8) = data[0];
-                    *(ptr.offset(0xB1) as *mut u8) = data[1];
-                    *(ptr.offset(0xB2) as *mut u8) = data[2];
-                    *(ptr.offset(0xB3) as *mut u8) = data[3];
-                }
-
-                if let Some(gateway) = self.additional.gateway {
-                    let data = gateway.octets();
-                    *(ptr.offset(0xB4) as *mut u8) = data[0];
-                    *(ptr.offset(0xB5) as *mut u8) = data[1];
-                    *(ptr.offset(0xB6) as *mut u8) = data[2];
-                    *(ptr.offset(0xB7) as *mut u8) = data[3];
-                }
-
-                if let Some(mask) = self.additional.mask {
-                    let data = mask.octets();
-                    *(ptr.offset(0xB8) as *mut u8) = data[0];
-                    *(ptr.offset(0xB9) as *mut u8) = data[1];
-                    *(ptr.offset(0xBA) as *mut u8) = data[2];
-                    *(ptr.offset(0xBB) as *mut u8) = data[3];
-                }
-
-                *(ptr.offset(0xBC) as *mut u64) = mem_addr;
-
-                self.klog = Some(vm_mem.as_ptr().offset(header.paddr as isize + 0x5000) as *const i8);
-                self.mboot = Some(vm_mem.as_mut_ptr().offset(header.paddr as isize) as *mut u8);
+                let start = pstart.unwrap();
+                *(vm_mem.as_mut_ptr().offset(start + 0x38) as *mut u64) = header.paddr + header.memsz - start as u64; // total kernel size
             }
         }
 
