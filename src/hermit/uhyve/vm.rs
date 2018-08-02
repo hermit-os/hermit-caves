@@ -387,8 +387,6 @@ impl VirtualMachine {
 
         let mut chip = kvm_irqchip::default();
         chip.chip_id = KVM_IRQCHIP_IOAPIC;
-
-        let mut chip = kvm_irqchip::default();
         self.get_irqchip(&mut chip)?;
         for i in 0 .. KVM_IOAPIC_NUM_PINS as usize {
             unsafe {
