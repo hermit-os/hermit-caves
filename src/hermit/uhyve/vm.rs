@@ -125,6 +125,16 @@ impl VirtualMachine {
             unsafe { libc::mprotect((mem.as_mut_ptr() as *mut libc::c_void).offset(KVM_32BIT_GAP_START as isize), KVM_32BIT_GAP_START, libc::PROT_NONE); }
         }
 
+        if add.mergable {
+            unsafe { libc::madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), libc::MADV_MERGEABLE); }
+            debug!("VM uses KSN feature \"mergeable\" to reduce the memory footprint.");
+        }
+
+        if add.hugepage {
+            unsafe { libc::madvise(mem.as_mut_ptr() as *mut libc::c_void, mem.len(), libc::MADV_HUGEPAGE); }
+            debug!("VM uses huge pages to improve the performance.");
+        }
+
         let control = ControlData {
             running: AtomicBool::new(false),
             interrupt: AtomicBool::new(false),
