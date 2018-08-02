@@ -1043,14 +1043,14 @@ void init_kvm_arch(void)
 		 */
 		madvise(guest_mem, guest_size, MADV_MERGEABLE);
 		if (verbose)
-			fprintf(stderr, "VM uses KSN feature \"mergeable\" to reduce the memory footprint.\n");
+			fprintf(stderr, "Uhyve uses KSM feature \"mergeable\" to reduce the memory footprint.\n");
 	}
 
 	const char* hugepage = getenv("HERMIT_HUGEPAGE");
-	if (merge && (strcmp(merge, "0") != 0)) {
+	if (!(hugepage && (strcmp(hugepage, "0") == 0))) {
 		madvise(guest_mem, guest_size, MADV_HUGEPAGE);
 		if (verbose)
-			fprintf(stderr, "VM uses huge pages to improve the performance.\n");
+			fprintf(stderr, "Uhyvde uses huge pages to improve the performance.\n");
 	}
 
 	struct kvm_userspace_memory_region kvm_region = {
