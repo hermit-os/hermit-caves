@@ -2,7 +2,7 @@ use std::mem;
 use std::ptr;
 use std::fs::File;
 use std::os::unix::io::{FromRawFd, RawFd};
-use std::intrinsics::{volatile_load,volatile_store};
+use std::ptr::{read_volatile, write_volatile};
 use std::thread;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -450,11 +450,11 @@ impl VirtualCPU {
 
     pub fn run_vcpu(state: SharedState, id: u32, fd: RawFd, net_if: Arc<Option<NetworkInterface>>) -> ExitCode {
         unsafe {
-            while volatile_load(state.mboot.offset(0x20)) < id as u8 {
+            while read_volatile(state.mboot.offset(0x20)) < id as u8 {
                 thread::yield_now();
             }
 
-            volatile_store(state.mboot.offset(0x30), id as u8);
+            write_volatile(state.mboot.offset(0x30), id as u8);
         }
 
         let tmp = signal::SigSet::empty();
