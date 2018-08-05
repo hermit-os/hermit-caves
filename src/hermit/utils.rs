@@ -1,11 +1,70 @@
 use std::fs::{File, remove_file};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::ops::{Deref, DerefMut};
+use std::ptr;
 
+use libc;
 use nix::unistd::{mkstemp, close};
 use raw_cpuid::CpuId;
 
 use hermit::error::*;
+
+pub struct MemoryMapMut {
+    mem: *mut u8,
+    size: usize
+}
+
+impl MemoryMapMut {
+    pub fn anon(size: usize) -> Result<MemoryMapMut> {
+        let mem_ptr = unsafe {
+            libc::mmap(ptr::null_mut(), size,
+                libc::PROT_READ | libc::PROT_WRITE, libc::MAP_PRIVATE | libc::MAP_ANON, -1, 0)
+        };
+        if mem_ptr == libc::MAP_FAILED {
+            return Err(Error::NotEnoughMemory);
+        }
+        Ok(MemoryMapMut { mem: mem_ptr as *mut u8, size: size })
+    }
+}
+
+impl Deref for MemoryMapMut {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        unsafe { ::std::slice::from_raw_parts(self.mem, self.size) }
+    }
+}
+
+impl DerefMut for MemoryMapMut {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [u8] {
+        unsafe { ::std::slice::from_raw_parts_mut(self.mem, self.size) }
+    }
+}
+
+impl AsRef<[u8]> for MemoryMapMut {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.deref()
+    }
+}
+
+impl AsMut<[u8]> for MemoryMapMut {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.deref_mut()
+    }
+}
+
+impl Drop for MemoryMapMut {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.mem as *mut ::libc::c_void, self.size);
+        }
+    }
+}
 
 pub unsafe fn any_as_u8_mut_slice<T: Sized>(p: &mut T) -> &mut [u8] {
     ::std::slice::from_raw_parts_mut(

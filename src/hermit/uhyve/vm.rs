@@ -16,7 +16,7 @@ use std::mem;
 use std::rc::Rc;
 
 use libc;
-use memmap::{Mmap, MmapMut};
+use memmap::Mmap;
 use elf;
 use elf::types::{ELFCLASS64, OSABI, PT_LOAD, ET_EXEC, EM_X86_64};
 use chan_signal::Signal;
@@ -97,7 +97,7 @@ pub struct ControlData {
 pub struct VirtualMachine {
     kvm: Rc<uhyve::KVM>,
     vm_fd: RawFd,
-    mem: MmapMut,
+    mem: utils::MemoryMapMut,
     elf_entry: Option<u64>,
     klog: Option<*const i8>,
     mboot: Option<*mut u8>,
@@ -115,16 +115,14 @@ impl VirtualMachine {
         debug!("New virtual machine with memory size {}", size);
 
         // create a new memory region to map the memory of our guest
-        let mut mem;
-        if size < KVM_32BIT_GAP_START {
-            mem = MmapMut::map_anon(size)
-                .map_err(|_| Error::NotEnoughMemory)?;
+        let mut mem = if size < KVM_32BIT_GAP_START {
+            utils::MemoryMapMut::anon(size)?
         } else {
-            mem = MmapMut::map_anon(size + KVM_32BIT_GAP_START)
-                .map_err(|_| Error::NotEnoughMemory)?;
+            let mut tmp = utils::MemoryMapMut::anon(size + KVM_32BIT_GAP_START)?;
             
-            unsafe { libc::mprotect((mem.as_mut_ptr() as *mut libc::c_void).offset(KVM_32BIT_GAP_START as isize), KVM_32BIT_GAP_START, libc::PROT_NONE); }
-        }
+            unsafe { libc::mprotect(tmp.as_mut_ptr().offset(KVM_32BIT_GAP_START as isize) as *mut libc::c_void, KVM_32BIT_GAP_START, libc::PROT_NONE); }
+            tmp
+        };
 
         if add.mergable {
             unsafe {

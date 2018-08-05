@@ -16,6 +16,7 @@ use nix;
 
 use memmap::{MmapMut, MmapOptions};
 
+use hermit::utils::MemoryMapMut;
 use hermit::uhyve;
 use hermit::uhyve::kvm::*;
 use hermit::error::*;
@@ -99,7 +100,7 @@ pub struct VirtualCPU {
 extern "C" fn empty_handler(_: i32) {}
 
 impl VirtualCPU {
-    pub fn new(kvm: Rc<uhyve::KVM>, vcpu_fd: RawFd, id: u32, mmap_size: usize, mem: &mut MmapMut,
+    pub fn new(kvm: Rc<uhyve::KVM>, vcpu_fd: RawFd, id: u32, mmap_size: usize, mem: &mut MemoryMapMut,
         mboot: *mut u8, control: Arc<ControlData>, extensions: KVMExtensions) -> Result<VirtualCPU> {
         debug!("New virtual CPU with id {} and FD {}", id, vcpu_fd);
 
