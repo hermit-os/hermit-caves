@@ -437,14 +437,15 @@ static int vcpu_loop(void)
 
 			case UHYVE_PORT_NETWRITE: {
 					uhyve_netwrite_t* uhyve_netwrite = (uhyve_netwrite_t*)(guest_mem + raddr);
-					uhyve_netwrite->ret = 0;
-					ret = write(netfd, guest_mem + (size_t)uhyve_netwrite->data, uhyve_netwrite->len);
-					if (ret >= 0) {
-						uhyve_netwrite->ret = 0;
-						uhyve_netwrite->len = ret;
-					} else {
-						uhyve_netwrite->ret = -1;
+					size_t len=0;
+					while(len < uhyve_netwrite->len) {
+						ret = write(netfd, guest_mem + (size_t)uhyve_netwrite->data + len, uhyve_netwrite->len - len);
+						if (ret > 0)
+							len += ret;
+
 					}
+					uhyve_netwrite->ret = 0;
+					uhyve_netwrite->len = len;
 					break;
 				}
 
