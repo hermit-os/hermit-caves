@@ -828,7 +828,7 @@ void *migration_handler(void *arg)
 	if (get_migration_type() == MIG_TYPE_LIVE) {
 		/* resend rounds */
 		for (i=0; i<MIG_ITERS; ++i) {
-			send_guest_mem(MIG_MODE_INCREMENTAL_DUMP, 0, mem_chunk_cnt, mem_chunks);
+			send_guest_mem(0, mem_chunk_cnt, mem_chunks);
 		}
 	}
 
@@ -840,7 +840,7 @@ void *migration_handler(void *arg)
 	pthread_barrier_wait(&migration_barrier);
 
 	/* send the final dump */
-	send_guest_mem(MIG_MODE_INCREMENTAL_DUMP, 1, mem_chunk_cnt, mem_chunks);
+	send_guest_mem(1, mem_chunk_cnt, mem_chunks);
 	fprintf(stderr, "Memory sent! (Guest size: %zu bytes)\n", guest_size);
 
 	/* free mem_chunk info */
