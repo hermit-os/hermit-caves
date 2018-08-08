@@ -42,7 +42,93 @@ static struct sockaddr_in mig_server;
 static int com_sock = 0;
 static int listen_sock = 0;
 
-static mig_type_t mig_type = MIG_TYPE_COLD;
+mig_params_t mig_params = {
+	.type = MIG_TYPE_COLD,
+	.mode = MIG_MODE_COMPLETE_DUMP,
+	.use_odp = false,
+	.prefetch = false,
+};
+
+/**
+ * \brief Generates a setter for a migration parameter
+ *
+ * \param param The parameter that is to be set
+ *
+ * \param mig_param_str A string defining the respective migration parameter
+ *
+ */
+#define define_migration_param_setter(param)                                   \
+void                                                                           \
+set_migration_##param(const char *mig_param_str)                               \
+{                                                                              \
+	if (mig_param_str == NULL)                                             \
+		return;                                                        \
+                                                                               \
+	int i;                                                                 \
+	bool found_param = false;                                              \
+	for (i=0; i<sizeof(mig_##param##_conv)/sizeof(mig_##param##_conv[0]); ++i) { \
+		if (!strcmp (mig_param_str, mig_##param##_conv[i].str)) {      \
+			mig_params.param = mig_##param##_conv[i].mig_##param;\
+			found_param = true;                                    \
+		}                                                              \
+	}                                                                      \
+                                                                               \
+	if (!found_param) {                                                    \
+		/* we do not know this migration param */                      \
+		fprintf(stderr, "[ERROR] Migration ##param## '%s' not "        \
+				"supported. Fallback to default\n",            \
+				mig_param_str);                                \
+	}                                                                      \
+	return;                                                                \
+} \
+
+#define define_migration_param_getter(param)                                   \
+const char *                                                                         \
+get_migration_##param##_str(mig_##param##_t mig_##param)                       \
+{                                                                              \
+	return mig_##param##_conv[mig_##param].str;                            \
+} \
+
+/* define setter for migration parameters */
+define_migration_param_setter(type)
+define_migration_param_setter(mode)
+define_migration_param_getter(type)
+define_migration_param_getter(mode)
+
+/**
+ * \brief prints the migration parameters
+ */
+void
+print_migration_params(void)
+{
+	printf("========== MIGRATION PARAMETERS ==========\n");
+	printf("   MODE     : %s\n", get_migration_mode_str(mig_params.mode));
+	printf("   TYPE     : %s\n", get_migration_type_str(mig_params.type));
+	printf("   USE ODP  : %u\n", mig_params.use_odp);
+	printf("   PREFETCH : %u\n", mig_params.prefetch);
+	printf("==========================================\n");
+}
+
+/**
+ * \brief Sets the migration parameters in accordance with a given file
+ *
+ * \param mig_param_file path to the file containing the migration parameters
+ */
+void
+set_migration_params(const char *mig_param_filename)
+{
+	if (mig_param_filename == NULL)
+		return;
+
+	FILE *mig_param_file = fopen(mig_param_filename, "r");
+	char tmp_str[MAX_PARAM_STR_LEN];
+	fscanf(mig_param_file, "mode: %s\n", tmp_str);
+	set_migration_mode(tmp_str);
+	fscanf(mig_param_file, "type: %s\n", tmp_str);
+	set_migration_type(tmp_str);
+	fscanf(mig_param_file, "use-odp: %u\n", (uint32_t*)&mig_params.use_odp);
+	fscanf(mig_param_file, "prefetch: %u\n", (uint32_t*)&mig_params.prefetch);
+}
 
 /**
  * \brief Returns the configured migration type
@@ -50,35 +136,7 @@ static mig_type_t mig_type = MIG_TYPE_COLD;
 mig_type_t
 get_migration_type(void)
 {
-	return mig_type;
-}
-
-/**
- * \brief Sets the migration type
- *
- * \param mig_type_str A string defining the migration type
- */
-void
-set_migration_type(const char *mig_type_str)
-{
-	if (mig_type_str == NULL)
-		return;
-
-	int i;
-	bool found_type = false;
-	for (i=0; i<sizeof(mig_type_conv)/sizeof(mig_type_conv[0]); ++i) {
-		if (!strcmp (mig_type_str, mig_type_conv[i].str)) {
-			mig_type = mig_type_conv[i].mig_type;
-			found_type = true;
-		}
-	}
-
-	/* we do not know this migration type */
-	if (!found_type) {
-		fprintf(stderr, "ERROR: Migration type '%s' not supported. Fallback to 'cold'\n", mig_type_str);
-	}
-
-	return;
+	return mig_params.type;
 }
 
 /**
@@ -138,12 +196,16 @@ void connect_to_server(void)
 		exit(EXIT_FAILURE);
 	}
 
-      	fprintf(stderr, "Trying to connect to migration server: %s\n", buf);
+	fprintf(stderr, "[INFO] Trying to connect to migration server: %s\n", buf);
 	if (connect(com_sock, (struct sockaddr *)&mig_server, sizeof(mig_server)) < 0) {
 		perror("connect");
 		exit(EXIT_FAILURE);
     	}
-      	fprintf(stderr, "Successfully connected to: %s\n", buf);
+	fprintf(stderr, "[INFO] Successfully connected to: %s\n", buf);
+
+	/* send migration parameters */
+	res = send_data(&mig_params, sizeof(mig_params_t));
+	print_migration_params();
 }
 
 
@@ -159,7 +221,7 @@ void wait_for_client(uint16_t listen_portno)
 	struct sockaddr_in client_addr;
 
 	/* open migration socket */
-	fprintf(stderr, "Waiting for incomming migration request ...\n");
+	fprintf(stderr, "[INFO] Waiting for incomming migration request ...\n");
 	listen_sock = socket(AF_INET, SOCK_STREAM, 0);
 	memset(&serv_addr, '0', sizeof(serv_addr));
 
@@ -181,7 +243,11 @@ void wait_for_client(uint16_t listen_portno)
 		perror("inet_ntop");
 		exit(EXIT_FAILURE);
 	}
-	fprintf(stderr, "Incomming migration from: %s\n", buf);
+	fprintf(stderr, "[INFO] Incomming migration from: %s\n", buf);
+
+	/* recv migration parameters */
+	res = recv_data(&mig_params, sizeof(mig_params_t));
+	print_migration_params();
 }
 
 /**
@@ -237,10 +303,10 @@ void close_migration_channel(void)
 
 
 #ifndef __RDMA_MIGRATION__
-void send_guest_mem(mig_mode_t mode, bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
 {
 	/* determine migration mode */
-	switch (mode) {
+	switch (mig_params.mode) {
 	case MIG_MODE_INCREMENTAL_DUMP:
 		fprintf(stderr, "ERROR: Incremental dumps currently not supported via TCP/IP. Fallback to complete dump!\n");
 	case MIG_MODE_COMPLETE_DUMP:
