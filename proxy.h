@@ -36,7 +36,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#define HERMIT_ELFOSABI	0x42
+#define HERMIT_ELFOSABI	0xFF
 
 #define __HERMIT_exit	0
 #define __HERMIT_write	1
