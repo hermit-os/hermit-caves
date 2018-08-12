@@ -31,7 +31,6 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
-#include <infiniband/verbs_exp.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
@@ -44,6 +43,7 @@
 
 
 #ifdef __RDMA_MIGRATION__
+#define IB_USE_ODP 		(0)
 
 #define IB_CQ_ENTRIES 		(1)
 #define IB_MAX_INLINE_DATA 	(0)
@@ -137,7 +137,7 @@ void print_send_wr_info(uint64_t id)
  * state ready to be connected with the remote side.
  */
 static void
-init_com_hndl(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks, bool sender)
+init_com_hndl(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
 {
 	/* initialize com_hndl */
 	memset(&com_hndl, 0, sizeof(com_hndl));
@@ -254,11 +254,9 @@ init_com_hndl(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks, bool sender)
 	com_hndl.mrs = (struct ibv_mr**)malloc(sizeof(struct ibv_mr*)*com_hndl.mr_cnt);
 
 	int access_flags = (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-// 	TODO: check ODP support via capability mask
-//	if ((mig_params.use_odp) &&
-//	    (com_hndl.dev_attr_ex.odp_caps.general_caps & IBV_ODP_SUPPORT) &&
-//	    (com_hndl.dev_attr_ex.odp_caps.per_transport_caps.rc_odp_caps & IBV_ODP_SUPPORT_WRITE)) {
-	if (mig_params.use_odp) {
+	if ((IB_USE_ODP) &&
+	    (com_hndl.dev_attr_ex.odp_caps.general_caps & IBV_ODP_SUPPORT) &&
+	    (com_hndl.dev_attr_ex.odp_caps.per_transport_caps.rc_odp_caps & IBV_ODP_SUPPORT_WRITE)) {
 		access_flags |= IBV_ACCESS_ON_DEMAND;
 	}
 
@@ -613,26 +611,6 @@ create_send_list_entry (void *addr, size_t addr_size, void *page, size_t page_si
 
 			send_wr->wr.rdma.rkey 		= com_hndl.rem_qp_info.keys[i];
 
-			/* prefetch MR */
-			if (mig_params.use_odp && mig_params.prefetch) {
-				struct ibv_exp_prefetch_attr prefetch_attr = {
-					.flags 		= IBV_EXP_PREFETCH_WRITE_ACCESS,
-					.addr 		= page,
-					.length 	= page_size,
-					.comp_mask 	= 0,
-				};
-
-				int ret = 0;
-				if ((ret = ibv_exp_prefetch_mr(com_hndl.mrs[i], &prefetch_attr)) < 0) {
-					fprintf(stderr,
-						"[WARNING] Could not prefetch within MR #%d - result %d "
-						"- %d (%s).\n",
-						i,
-						ret,
-						errno,
-						strerror(errno));
-				}
-			}
 			break;
 		}
 	}
@@ -658,7 +636,7 @@ create_send_list_entry (void *addr, size_t addr_size, void *page, size_t page_si
 		send_list_last = send_list_last->next;
 	}
 	/* we have to request a CQE if max_send_wr is reached to avoid overflows */
-	if ((++send_list_length%IB_MAX_SEND_WR) == 0) {
+	if ((++send_list_length%com_hndl.dev_attr_ex.orig_attr.max_qp_wr) == 0) {
 		send_list_last->send_flags 	= IBV_SEND_SIGNALED;
 	}
 }
@@ -703,18 +681,17 @@ void enqueue_all_mrs(void)
 /**
  * \brief Sends the guest memory to the destination
  *
- * \param final_dump last dump of a live migration
- * \param mem_chunk_cnt number of memory chunks to be registered
- * \param mem_chunks an array of memory chunks to be registered
+ * \param mode MIG_MODE_COMPLETE_DUMP sends the complete memory and
+ *             MIG_MODE_INCREMENTAL_DUMP only the mapped guest pages
  */
-void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+void send_guest_mem(mig_mode_t mode, bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
 {
 	int res = 0, i = 0;
 	static bool ib_initialized = false;
 
 	/* prepare IB channel */
 	if (!ib_initialized) {
-		init_com_hndl(mem_chunk_cnt, mem_chunks, true);
+		init_com_hndl(mem_chunk_cnt, mem_chunks);
 		exchange_qp_info(false);
 		con_com_buf();
 
@@ -722,7 +699,7 @@ void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chun
 	}
 
 	/* determine migration mode */
-	switch (mig_params.mode) {
+	switch (mode) {
 	case MIG_MODE_COMPLETE_DUMP:
 		enqueue_all_mrs();
 		break;
@@ -740,7 +717,7 @@ void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chun
 		create_send_list_entry(NULL, 0, NULL, 0);
 
 	/* we have to wait for the last WR before informing dest */
-	if ((mig_params.mode == MIG_MODE_COMPLETE_DUMP) || final_dump) {
+	if ((mode == MIG_MODE_COMPLETE_DUMP) || final_dump) {
 		send_list_last->wr_id 		= IB_WR_WRITE_LAST_PAGE_ID;
 		send_list_last->opcode 		= IBV_WR_RDMA_WRITE_WITH_IMM;
 		send_list_last->send_flags 	= IBV_SEND_SIGNALED | IBV_SEND_SOLICITED;
@@ -750,7 +727,7 @@ void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chun
 		send_list_last->send_flags 	= IBV_SEND_SIGNALED;
 	}
 
-	printf("[DEBUG] Send list length %d\n", send_list_length);
+	printf("DEBUG: Send list length %d\n", send_list_length);
 
 	/* we have to call ibv_post_send() as long as 'send_list' contains elements  */
  	struct ibv_wc wc;
@@ -835,7 +812,7 @@ void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
 	int res = 0;
 
 	/* prepare IB channel */
-	init_com_hndl(mem_chunk_cnt, mem_chunks, false);
+	init_com_hndl(mem_chunk_cnt, mem_chunks);
 	exchange_qp_info(true);
 	con_com_buf();
 

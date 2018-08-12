@@ -749,7 +749,7 @@ int uhyve_loop(int argc, char **argv)
 {
 	const char* hermit_check = getenv("HERMIT_CHECKPOINT");
 	const char* hermit_mig_support = getenv("HERMIT_MIGRATION_SUPPORT");
-	const char* hermit_mig_params = getenv("HERMIT_MIGRATION_PARAMS");
+	const char* hermit_mig_type = getenv("HERMIT_MIGRATION_TYPE");
 	const char* hermit_debug = getenv("HERMIT_DEBUG");
 	int ts = 0, i = 0;
 
@@ -786,7 +786,7 @@ int uhyve_loop(int argc, char **argv)
 
 	if (hermit_mig_support) {
 		set_migration_target(hermit_mig_support, MIGRATION_PORT);
-		set_migration_params(hermit_mig_params);
+		set_migration_type(hermit_mig_type);
 
 		/* block SIGUSR1 in main thread */
 		sigemptyset (&signal_mask);

@@ -40,21 +40,11 @@ extern size_t guest_size;
 extern uint8_t* guest_mem;
 
 #define MIGRATION_PORT 1337
-#define MAX_PARAM_STR_LEN 128
 
 typedef enum {
-	MIG_MODE_COMPLETE_DUMP = 0,
+	MIG_MODE_COMPLETE_DUMP = 1,
 	MIG_MODE_INCREMENTAL_DUMP,
 } mig_mode_t;
-
-const static struct {
-	mig_mode_t mig_mode;
-	const char *str;
-} mig_mode_conv [] = {
-	{MIG_MODE_COMPLETE_DUMP, "complete-dump"},
-	{MIG_MODE_INCREMENTAL_DUMP, "incremental-dump"},
-};
-
 
 typedef enum {
 	MIG_TYPE_COLD = 0,
@@ -69,14 +59,6 @@ const static struct {
 	{MIG_TYPE_LIVE, "live"},
 };
 
-
-typedef struct _mig_params {
-	mig_type_t type;
-	mig_mode_t mode;
-	bool use_odp;
-	bool prefetch;
-} mig_params_t;
-
 typedef struct _mem_chunk {
 	size_t size;
 	uint8_t *ptr;
@@ -90,11 +72,7 @@ typedef struct _migration_metadata {
 	bool full_checkpoint;
 } migration_metadata_t;
 
-
-mig_params_t mig_params;
-
-void set_migration_params(const char *migration_param_filename);
-
+void set_migration_type(const char *mig_type_str);
 mig_type_t get_migration_type(void);
 
 void wait_for_client(uint16_t listen_portno);
@@ -105,7 +83,7 @@ void close_migration_channel(void);
 int recv_data(void *buffer, size_t length);
 int send_data(void *buffer, size_t length);
 
-void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
+void send_guest_mem(mig_mode_t mode, bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
 void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
 #endif /* __UHYVE_MIGRATION_H__ */
 
