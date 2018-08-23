@@ -90,12 +90,13 @@ uint8_t* guest_mem = NULL;
 uint32_t no_checkpoint = 0;
 uint32_t ncores = 1;
 uint64_t elf_entry;
-int kvm = -1, vmfd = -1, netfd = -1, efd = -1;
+int kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
 uint8_t* mboot = NULL;
 __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
 static sem_t net_sem;
+sem_t mig_sem;
 
 int uhyve_argc = -1;
 int uhyve_envc = -1;
@@ -105,6 +106,8 @@ char **uhyve_envp = NULL;
 
 vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t   signal_mask;
+
+mem_mappings_t mem_mappings = {NULL, 0};
 
 typedef struct {
 	int argc;
@@ -117,6 +120,14 @@ typedef struct {
 	char **argv;
 	char **envp;
 } __attribute__ ((packed)) uhyve_cmdval_t;
+
+/* see also: arch/<type>/mm/memory.c */
+typedef struct alloc_list {
+	size_t start, end;
+	struct alloc_list* next;
+	struct alloc_list* prev;
+} alloc_list_t;
+
 
 static inline size_t min(const size_t a, const size_t b)
 {
@@ -252,10 +263,10 @@ static inline void check_network(void)
 
 		efd = eventfd(0, 0);
 		irqfd.fd = efd;
-		irqfd.gsi = UHYVE_IRQ;
+		irqfd.gsi = UHYVE_IRQ_NET;
 		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
 
-		sem_init(&net_sem, 0, 0);
+		sem_init(&net_sem, 1, 0);
 
 		if (pthread_create(&net_thread, NULL, wait_for_packet, NULL))
 			err(1, "unable to create thread");
@@ -509,6 +520,46 @@ static int vcpu_loop(void)
 					for(i=0; i<uhyve_envc; i++)
 						strcpy(guest_mem + (size_t)env_ptr[i], uhyve_envp[i]);
 
+					break;
+				}
+
+			case UHYVE_PORT_ALLOCLIST: {
+					/* check if we received a valid list */
+					if (raddr == 0) {
+						sem_post(&mig_sem);
+						break;
+					}
+
+					alloc_list_t *alloc_list_last = (alloc_list_t*)(guest_mem+raddr);
+
+					size_t guest_null = (size_t)(guest_mem-1);
+					size_t physical_address = 0;
+
+					/* determine list length */
+					size_t alloc_list_length = 0;
+					alloc_list_t *cur = alloc_list_last;
+					for (alloc_list_length=0; (size_t)cur != guest_null; ++alloc_list_length) {
+						uhyve_gdb_guest_virt_to_phys(vcpufd, (uint64_t)cur->prev, &physical_address);
+						cur = (alloc_list_t*)(guest_mem+physical_address);
+					}
+					/* create mem_mapppings structur */
+					mem_mappings.count = alloc_list_length;
+					mem_mappings.mem_chunks = (mem_chunk_t*)malloc(mem_mappings.count*sizeof(mem_chunk_t));
+
+					/* fill mem_mappings structur */
+					size_t i = 0;
+					cur = alloc_list_last;
+					for (i=0; (size_t)cur != guest_null; ++i) {
+						/* create entry in mem_mappings */
+						mem_mappings.mem_chunks[i].ptr = (uint8_t*)cur->start;
+						mem_mappings.mem_chunks[i].size = cur->end - cur->start;
+
+						/* go to next element */
+						uhyve_gdb_guest_virt_to_phys(vcpufd, (uint64_t)cur->prev, &physical_address);
+						cur = (alloc_list_t*)(guest_mem+physical_address);
+					}
+
+					sem_post(&mig_sem);
 					break;
 				}
 
@@ -802,6 +853,22 @@ int uhyve_loop(int argc, char **argv)
 		memset(&sa, 0x00, sizeof(sa));
 		sa.sa_handler = &vcpu_thread_mig_handler;
 		sigaction(SIGTHRMIG, &sa, NULL);
+
+		/* install eventfd and semaphore for memory mapping requests */
+		struct kvm_irqfd irqfd = {};
+
+		fprintf(stderr, "[INFO] Creating eventfd for migration "
+				"requests\n");
+		if ((mig_efd = eventfd(0, 0)) < 0) {
+			fprintf(stderr, "[WARNING] Could create the migration "
+					"eventfd - %d (%s).\n",
+					errno,
+					strerror(errno));
+		}
+		irqfd.fd = mig_efd;
+		irqfd.gsi = UHYVE_IRQ_MIGRATION;
+		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
+		sem_init(&mig_sem, 0, 0);
 	}
 
 
