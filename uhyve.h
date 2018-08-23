@@ -44,6 +44,8 @@
 #define UHYVE_PORT_NETREAD              0x680
 #define UHYVE_PORT_NETSTAT              0x700
 
+#define UHYVE_PORT_ALLOCLIST 		0x720
+
 /* Ports and data structures for uhyve command line arguments and envp
  * forwarding */
 #define UHYVE_PORT_CMDSIZE		0x740
@@ -51,7 +53,9 @@
 
 #define UHYVE_UART_PORT			0x800
 
-#define UHYVE_IRQ       11
+#define UHYVE_IRQ_BASE            11
+#define UHYVE_IRQ_NET             (UHYVE_IRQ_BASE+0)
+#define UHYVE_IRQ_MIGRATION       (UHYVE_IRQ_BASE+1)
 
 #define SIGTHRCHKP 	(SIGRTMIN+0)
 #define SIGTHRMIG 	(SIGRTMIN+1)

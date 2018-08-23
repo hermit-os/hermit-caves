@@ -30,6 +30,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <semaphore.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,9 @@ static struct sockaddr_in mig_server;
 static int com_sock = 0;
 static int listen_sock = 0;
 
+extern sem_t mig_sem;
+extern int mig_efd;
+
 mig_params_t mig_params = {
 	.type = MIG_TYPE_COLD,
 	.mode = MIG_MODE_COMPLETE_DUMP,
@@ -49,6 +53,7 @@ mig_params_t mig_params = {
 	.prefetch = false,
 };
 
+extern mem_mappings_t mem_mappings;
 /**
  * \brief Generates a setter for a migration parameter
  *
@@ -182,30 +187,32 @@ void set_migration_target(const char *ip_str, int port)
 /**
  * \brief Connects to a migration target via TCP/IP
  */
-void connect_to_server(void)
+int connect_to_server(void)
 {
 	int res = 0;
 	char buf[INET_ADDRSTRLEN];
 	if (inet_ntop(AF_INET, (const void*)&mig_server.sin_addr, buf, INET_ADDRSTRLEN) == NULL) {
 		perror("inet_ntop");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	if((com_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		perror("socket");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	fprintf(stderr, "[INFO] Trying to connect to migration server: %s\n", buf);
 	if (connect(com_sock, (struct sockaddr *)&mig_server, sizeof(mig_server)) < 0) {
 		perror("connect");
-		exit(EXIT_FAILURE);
+		return -1;
     	}
 	fprintf(stderr, "[INFO] Successfully connected to: %s\n", buf);
 
 	/* send migration parameters */
 	res = send_data(&mig_params, sizeof(mig_params_t));
 	print_migration_params();
+
+	return 0;
 }
 
 
@@ -299,6 +306,38 @@ void close_migration_channel(void)
 		close_sock(listen_sock);
 	}
 	close_sock(com_sock);
+}
+
+
+/**
+ * \brief Requests the memory mappings from the guest kernel
+ */
+void request_mem_mappings(void)
+{
+	/* request mem_mappings */
+	fprintf(stderr, "[INFO] Requsting guest's memory mappings ...\n");
+	mem_mappings.mem_chunks = NULL;
+	mem_mappings.count = 0;
+	uint64_t event_counter = 1;
+	if (write(mig_efd, &event_counter, sizeof(event_counter)) < 0) {
+		fprintf(stderr, "[ERROR] Could not request the guest's memory "
+				"mappings - %d (%s) - "
+				"(filedes = %d; buf = 0x%x; nbyte = %u). "
+				"Abort!\n",
+				errno,
+				strerror(errno),
+				mig_efd,
+				&event_counter,
+				sizeof(event_counter));
+		return;
+	}
+
+	/* wait for mem_mappings */
+	sem_wait(&mig_sem);
+	/* TODO: not necessary in case of migration? - the guest can free the data structure now */
+	if (mem_mappings.count != 0) {
+		write(mig_efd, &event_counter, sizeof(event_counter));
+	}
 }
 
 
