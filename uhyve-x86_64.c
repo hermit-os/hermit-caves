@@ -111,6 +111,7 @@
 #include <asm/mman.h>
 
 #include "uhyve.h"
+#include "uhyve-gdb.h"
 #include "uhyve-x86_64.h"
 #include "uhyve-syscalls.h"
 #include "uhyve-migration.h"
@@ -141,6 +142,7 @@
 #define KVM_32BIT_MAX_MEM_SIZE	(1ULL << 32)
 #define KVM_32BIT_GAP_SIZE	(768 << 20)
 #define KVM_32BIT_GAP_START	(KVM_32BIT_MAX_MEM_SIZE - KVM_32BIT_GAP_SIZE)
+#define KVM_32BIT_GAP_END	(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE)
 
 /// Page offset bits
 #define PAGE_BITS			12
@@ -220,13 +222,14 @@ extern uint32_t no_checkpoint;
 extern uint32_t ncores;
 extern uint8_t* guest_mem;
 extern size_t guest_size;
-extern int kvm, vmfd, netfd, efd;
+extern int kvm, vmfd, netfd, efd, mig_efd;
 extern uint8_t* mboot;
 extern __thread struct kvm_run *run;
 extern __thread int vcpufd;
 extern __thread uint32_t cpuid;
 
 extern vcpu_state_t *vcpu_thread_states;
+extern mem_mappings_t mem_mappings;
 
 static inline void show_dtable(const char *name, struct kvm_dtable *dtable)
 {
@@ -442,18 +445,70 @@ static size_t prepare_mem_chunk_info(mem_chunk_t **mem_chunks) {
 	if (guest_size < KVM_32BIT_GAP_START) {
 		mem_chunk_cnt = 1;
 		*mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_chunk_cnt);
-		(*mem_chunks)[0].ptr = guest_mem;
+		(*mem_chunks)[0].ptr = 0;
 		(*mem_chunks)[0].size = guest_size;
 	} else {
 		mem_chunk_cnt = 2;
 		*mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_chunk_cnt);
-		(*mem_chunks)[0].ptr = guest_mem;
+		(*mem_chunks)[0].ptr = 0;
 		(*mem_chunks)[0].size = KVM_32BIT_GAP_START;
-		(*mem_chunks)[1].ptr = (uint8_t*)((uint64_t)guest_mem + (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
+		(*mem_chunks)[1].ptr = (uint8_t*)((uint64_t)(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
 		(*mem_chunks)[1].size = (uint64_t)guest_size - (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE);
 	}
 
 	return mem_chunk_cnt;
+}
+
+
+static void convert_to_host_virt(mem_mappings_t *mem_mappings)
+{
+	size_t i = 0;
+	/* convert guest-physical addrees to host-virtual */
+	fprintf(stderr, "[INFO] We have %u memory chunks\n", mem_mappings->count);
+	fprintf(stderr, "[INFO] ");
+	for (i=0; i<mem_mappings->count; ++i) {
+		fprintf(stderr, "(ADDR[%lu]: 0x%llx, SIZE[%lu]: 0x%llx); ",
+				i,
+				mem_mappings->mem_chunks[i].ptr,
+				i,
+				mem_mappings->mem_chunks[i].size);
+	}
+	printf("\b\b\n");
+
+	for (i=0; i<mem_mappings->count; ++i) {
+		uint8_t *cur_ptr = mem_mappings->mem_chunks[i].ptr;
+		mem_mappings->mem_chunks[i].ptr = (uint8_t*)(guest_mem+(size_t)cur_ptr);
+	}
+}
+
+/* checks wether the mem_mappings.mem_chunks[cur_slot] contains the IO gap */
+static inline void check_for_io_gap(size_t *cur_slot)
+{
+	size_t cur_start = (size_t)mem_mappings.mem_chunks[*cur_slot].ptr;
+	size_t cur_end = (size_t)mem_mappings.mem_chunks[*cur_slot].ptr + (size_t)mem_mappings.mem_chunks[*cur_slot].size;
+	if (cur_start == KVM_32BIT_GAP_START && cur_end == KVM_32BIT_GAP_END) {
+		/* remove the chunk */
+		*cur_slot -= 1;
+		mem_mappings.count--;
+	} else if (cur_end == KVM_32BIT_GAP_END) {
+		/* shrink element */
+		mem_mappings.mem_chunks[*cur_slot].size -= KVM_32BIT_GAP_SIZE;
+	} else if (cur_start == KVM_32BIT_GAP_START) {
+		/* shrink element and move start pointer*/
+		mem_mappings.mem_chunks[*cur_slot].size -= KVM_32BIT_GAP_SIZE;
+		mem_mappings.mem_chunks[*cur_slot].ptr += KVM_32BIT_GAP_SIZE;
+	} else if ((cur_start < KVM_32BIT_GAP_START) &&
+		   (cur_end > KVM_32BIT_GAP_END)) {
+		/* split element */
+		mem_mappings.mem_chunks[*cur_slot].size = KVM_32BIT_GAP_START - cur_start;
+
+		*cur_slot += 1;
+		mem_mappings.mem_chunks[*cur_slot].ptr = (uint8_t*)KVM_32BIT_GAP_END;
+		mem_mappings.mem_chunks[*cur_slot].size = cur_end - KVM_32BIT_GAP_END;
+		mem_mappings.count++;
+	}
+
+	return;
 }
 
 size_t determine_dest_offset(size_t src_addr)
@@ -692,6 +747,59 @@ void open_chk_file(char *fname)
 	}
 }
 
+
+/* determine guests memory mappings based on its free list
+ *
+ * The memory mappings are stored in terms of guest-physical pointers
+ */
+void determine_mem_mappings(free_list_t *free_list)
+{
+	/* determine list length */
+	size_t free_list_length = 0;
+	free_list_t *cur = free_list;
+	for (free_list_length=0; (size_t)cur != (size_t)guest_mem; ++free_list_length) {
+		cur = virt_to_phys_with_offset(cur->next);
+	}
+
+	/* create mem_mapppings structur
+	 * +1: alloc is possible one element longer
+	 * +1: the IO_GAP might result in an additional element
+	 */
+	size_t mem_mappings_cnt_max = free_list_length+2;
+	mem_mappings.mem_chunks = (mem_chunk_t*)malloc(mem_mappings_cnt_max*sizeof(mem_chunk_t));
+	mem_mappings.count = mem_mappings_cnt_max-2;
+
+
+	/* allocation prior to first free region */
+	size_t cur_slot = 0;
+	mem_mappings.mem_chunks[0].ptr = (uint8_t*)0x800000;
+	mem_mappings.mem_chunks[0].size = (uint8_t*)free_list->start - mem_mappings.mem_chunks[0].ptr;
+	check_for_io_gap(&cur_slot);
+
+	/* iterate the free list */
+	cur = free_list;
+	free_list_t *next = virt_to_phys_with_offset(cur->next);
+	for (++cur_slot; (uint8_t*)next != guest_mem; ++cur_slot) {
+		mem_mappings.mem_chunks[cur_slot].ptr = (uint8_t*)cur->end;
+		mem_mappings.mem_chunks[cur_slot].size = next->start - cur->end;
+
+		/* did we inlcude the IO gap? */
+		check_for_io_gap(&cur_slot);
+		cur = virt_to_phys_with_offset(cur->next);
+		next = virt_to_phys_with_offset(cur->next);
+	}
+
+	/* allocation behind last free region */
+	if (guest_size != cur->end) {
+		mem_mappings.mem_chunks[cur_slot].ptr = (uint8_t*)cur->end;
+		mem_mappings.mem_chunks[cur_slot].size = guest_size - cur->end;
+		check_for_io_gap(&cur_slot);
+	}
+
+	return;
+
+}
+
 void close_chk_file(void)
 {
 	fclose(chk_file);
@@ -798,12 +906,19 @@ void *migration_handler(void *arg)
 	sigset_t *signal_mask = (sigset_t *)arg;
 	int res = 0;
 	size_t i = 0;
+	int sig_caught;
 
-	int       sig_caught;    /* signal caught       */
+	while (1) {
+		/* wait for a migration request */
+		sigwait(signal_mask, &sig_caught);
 
-	/* Use same mask as the set of signals that we'd like to know about! */
-	sigwait(signal_mask, &sig_caught);
-	connect_to_server();
+		if (connect_to_server() < 0) {
+			fprintf(stderr, "[ERROR] Could not connect to the "
+					"destination. Abort!\n");
+		} else {
+			break;
+		}
+	}
 
 	/* send metadata */
 	migration_metadata_t metadata = {
@@ -822,13 +937,24 @@ void *migration_handler(void *arg)
       	fprintf(stderr, "Metadata sent! (%d bytes)\n", res);
 
 	/* prepare info concerning memory chunks */
-	mem_chunk_t *mem_chunks = NULL;
-	size_t mem_chunk_cnt = prepare_mem_chunk_info(&mem_chunks);
+	if (get_migration_type() == MIG_TYPE_COLD) {
+		generate_mem_mappings();
+	}
+	if ((get_migration_type() == MIG_TYPE_LIVE) || (mem_mappings.count == 0)) {
+		mem_mappings.count = prepare_mem_chunk_info(&mem_mappings.mem_chunks);
+	}
 
+	/* send to destination */
+	send_data(&(mem_mappings.count), sizeof(size_t));
+	send_data(mem_mappings.mem_chunks, mem_mappings.count*sizeof(mem_chunk_t));
+
+	convert_to_host_virt(&mem_mappings);
+
+	/* pre-copy phase */
 	if (get_migration_type() == MIG_TYPE_LIVE) {
 		/* resend rounds */
 		for (i=0; i<MIG_ITERS; ++i) {
-			send_guest_mem(0, mem_chunk_cnt, mem_chunks);
+			send_guest_mem(0, mem_mappings.count, mem_mappings.mem_chunks);
 		}
 	}
 
@@ -840,11 +966,12 @@ void *migration_handler(void *arg)
 	pthread_barrier_wait(&migration_barrier);
 
 	/* send the final dump */
-	send_guest_mem(1, mem_chunk_cnt, mem_chunks);
+	send_guest_mem(1, mem_mappings.count, mem_mappings.mem_chunks);
 	fprintf(stderr, "Memory sent! (Guest size: %zu bytes)\n", guest_size);
 
-	/* free mem_chunk info */
-	free(mem_chunks);
+	/* free mem_mappings info */
+	free(mem_mappings.mem_chunks);
+	mem_mappings.count = 0;
 
 	/* send CPU state */
 	res = send_data(vcpu_thread_states, sizeof(vcpu_state_t)*ncores);
@@ -878,10 +1005,20 @@ int load_migration_data(uint8_t* mem)
 		mboot = mem+paddr-GUEST_OFFSET;
 
 
-	mem_chunk_t *mem_chunks = NULL;
-	size_t mem_chunk_cnt = prepare_mem_chunk_info(&mem_chunks);
-	recv_guest_mem(mem_chunk_cnt, mem_chunks);
-	free(mem_chunks);
+	/* get memory chunk info from source and convert to host-virt */
+	mem_mappings.count = 0;
+        mem_mappings.mem_chunks = NULL;
+	recv_data(&(mem_mappings.count), sizeof(mem_mappings.count));
+
+	size_t recv_bytes = mem_mappings.count*sizeof(mem_chunk_t);
+	mem_mappings.mem_chunks = (mem_chunk_t*)malloc(recv_bytes);
+	recv_data(mem_mappings.mem_chunks, recv_bytes);
+	convert_to_host_virt(&mem_mappings);
+
+	recv_guest_mem(mem_mappings.count, mem_mappings.mem_chunks);
+	free(mem_mappings.mem_chunks);
+	mem_mappings.mem_chunks = NULL;
+	mem_mappings.count = 0;
 
 	/* receive cpu state */
 	assert(vcpu_thread_states == NULL);

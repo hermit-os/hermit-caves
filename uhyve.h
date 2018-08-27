@@ -44,6 +44,8 @@
 #define UHYVE_PORT_NETREAD              0x680
 #define UHYVE_PORT_NETSTAT              0x700
 
+#define UHYVE_PORT_FREELIST 		0x720
+
 /* Ports and data structures for uhyve command line arguments and envp
  * forwarding */
 #define UHYVE_PORT_CMDSIZE		0x740
@@ -51,7 +53,9 @@
 
 #define UHYVE_UART_PORT			0x800
 
-#define UHYVE_IRQ       11
+#define UHYVE_IRQ_BASE            11
+#define UHYVE_IRQ_NET             (UHYVE_IRQ_BASE+0)
+#define UHYVE_IRQ_MIGRATION       (UHYVE_IRQ_BASE+1)
 
 #define SIGTHRCHKP 	(SIGRTMIN+0)
 #define SIGTHRMIG 	(SIGRTMIN+1)
@@ -81,11 +85,26 @@ typedef struct _vcpu_state {
 	struct kvm_vcpu_events events;
 	struct kvm_mp_state mp_state;
 } vcpu_state_t;
+
+#define typeof __typeof__
+#define virt_to_phys_with_offset(virtual_address) ({ \
+	size_t physical_address = 0; \
+	size_t physical_address_end = 0; \
+	virt_to_phys((size_t)virtual_address, &physical_address, &physical_address_end); \
+	(typeof (virtual_address))(guest_mem+physical_address); \
+	})
 #else
 typedef struct _vcpu_state {
 	int dummy;
 } vcpu_state_t;
 #endif
+
+/* see also: arch/<type>/mm/memory.c */
+typedef struct free_list {
+	size_t start, end;
+	struct free_list* next;
+	struct free_list* prev;
+} free_list_t;
 
 typedef struct _migration_metadata migration_metadata_t;
 
@@ -105,6 +124,7 @@ void init_kvm_arch(void);
 int load_kernel(uint8_t* mem, char* path);
 size_t determine_dest_offset(size_t src_addr);
 void determine_dirty_pages(void (*save_page_handler)(void*, size_t, void*, size_t));
+void determine_mem_mappings(free_list_t *alloc_list);
 void virt_to_phys(const size_t virtual_address, size_t* const physical_address, size_t* const physical_address_page_end);
 
 #endif
