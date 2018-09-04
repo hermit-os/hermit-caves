@@ -82,6 +82,11 @@ typedef struct _mem_chunk {
 	uint8_t *ptr;
 } mem_chunk_t;
 
+typedef struct _mem_mappings {
+	mem_chunk_t *mem_chunks;
+	size_t count;
+} mem_mappings_t;
+
 typedef struct _migration_metadata {
 	uint32_t ncores;
 	size_t guest_size;
@@ -99,11 +104,13 @@ mig_type_t get_migration_type(void);
 
 void wait_for_client(uint16_t listen_portno);
 void set_migration_target(const char *ip_str, int port);
-void connect_to_server(void);
+int connect_to_server(void);
 void close_migration_channel(void);
 
 int recv_data(void *buffer, size_t length);
 int send_data(void *buffer, size_t length);
+
+void generate_mem_mappings(void);
 
 void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
 void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);

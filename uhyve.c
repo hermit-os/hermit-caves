@@ -90,12 +90,13 @@ uint8_t* guest_mem = NULL;
 uint32_t no_checkpoint = 0;
 uint32_t ncores = 1;
 uint64_t elf_entry;
-int kvm = -1, vmfd = -1, netfd = -1, efd = -1;
+int kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
 uint8_t* mboot = NULL;
 __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
 static sem_t net_sem;
+sem_t mig_sem;
 
 int uhyve_argc = -1;
 int uhyve_envc = -1;
@@ -105,6 +106,8 @@ char **uhyve_envp = NULL;
 
 vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t   signal_mask;
+
+mem_mappings_t mem_mappings = {NULL, 0};
 
 typedef struct {
 	int argc;
@@ -252,10 +255,10 @@ static inline void check_network(void)
 
 		efd = eventfd(0, 0);
 		irqfd.fd = efd;
-		irqfd.gsi = UHYVE_IRQ;
+		irqfd.gsi = UHYVE_IRQ_NET;
 		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
 
-		sem_init(&net_sem, 0, 0);
+		sem_init(&net_sem, 1, 0);
 
 		if (pthread_create(&net_thread, NULL, wait_for_packet, NULL))
 			err(1, "unable to create thread");
@@ -509,6 +512,21 @@ static int vcpu_loop(void)
 					for(i=0; i<uhyve_envc; i++)
 						strcpy(guest_mem + (size_t)env_ptr[i], uhyve_envp[i]);
 
+					break;
+				}
+
+			case UHYVE_PORT_FREELIST: {
+					/* check if we received a valid list */
+					if (raddr == 0) {
+						sem_post(&mig_sem);
+						break;
+					}
+
+					/* this is arch specific */
+					determine_mem_mappings((free_list_t*)(guest_mem+raddr));
+
+					/* wake up main thread */
+					sem_post(&mig_sem);
 					break;
 				}
 
@@ -802,6 +820,22 @@ int uhyve_loop(int argc, char **argv)
 		memset(&sa, 0x00, sizeof(sa));
 		sa.sa_handler = &vcpu_thread_mig_handler;
 		sigaction(SIGTHRMIG, &sa, NULL);
+
+		/* install eventfd and semaphore for memory mapping requests */
+		struct kvm_irqfd irqfd = {};
+
+		fprintf(stderr, "[INFO] Creating eventfd for migration "
+				"requests\n");
+		if ((mig_efd = eventfd(0, 0)) < 0) {
+			fprintf(stderr, "[WARNING] Could create the migration "
+					"eventfd - %d (%s).\n",
+					errno,
+					strerror(errno));
+		}
+		irqfd.fd = mig_efd;
+		irqfd.gsi = UHYVE_IRQ_MIGRATION;
+		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
+		sem_init(&mig_sem, 0, 0);
 	}
 
 
