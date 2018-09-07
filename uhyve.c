@@ -274,19 +274,22 @@ static int vcpu_loop(void)
 	if (restart) {
 		vcpu_state_t cpu_state = read_cpu_state();
 		restore_cpu_state(cpu_state);
-	} else if (vcpu_thread_states) {
-		restore_cpu_state(vcpu_thread_states[cpuid]);
-	} else {
-		init_cpu_state(elf_entry);
-	}
 
-	if (cpuid == 0) {
-		if (restart) {
+		/* chkpt no. of the following checkpoint */
+		if (cpuid == 0)
 			no_checkpoint++;
-		} else if (migration) {
+	} else if (vcpu_thread_states) {
+		/* restore VCPU states */
+		restore_cpu_state(vcpu_thread_states[cpuid]);
+
+		/* wait for all VCPUs and cleanup */
+		pthread_barrier_wait(&barrier);
+		if (cpuid == 0) {
 			free(vcpu_thread_states);
 			vcpu_thread_states = NULL;
 		}
+	} else {
+		init_cpu_state(elf_entry);
 	}
 
 	/* init uhyve gdb support */
