@@ -110,11 +110,11 @@ void close_migration_channel(void);
 int recv_data(void *buffer, size_t length);
 int send_data(void *buffer, size_t length);
 
-void generate_mem_mappings(void);
+void send_mem_regions(mem_mappings_t guest_physical_memory, mem_mappings_t mem_mappings);
+void recv_mem_regions(mem_mappings_t *mem_mappings);
 
-void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
-void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks);
+void precopy_phase(mem_mappings_t guest_mem, mem_mappings_t mem_mappings);
+void stop_and_copy_phase(void);
+void recv_guest_mem(mem_mappings_t mem_mappings);
 #endif /* __UHYVE_MIGRATION_H__ */
-
-
 
