@@ -30,8 +30,6 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
-#include <infiniband/verbs.h>
-#include <infiniband/verbs_exp.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
