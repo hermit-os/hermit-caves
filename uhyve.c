@@ -108,6 +108,7 @@ vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t   signal_mask;
 
 mem_mappings_t mem_mappings = {NULL, 0};
+mem_mappings_t guest_physical_memory = {NULL, 0};
 
 typedef struct {
 	int argc;
@@ -647,6 +648,29 @@ static void* uhyve_thread(void* arg)
 	pthread_cleanup_pop(1);
 
 	return (void*) ret;
+}
+
+
+/**
+ * \brief Generates the guest's mem_mappings based on its free list
+ */
+void determine_guest_allocations(void)
+{
+	/* request mem_mappings */
+	fprintf(stderr, "[INFO] Requsting guest's free list ...\n");
+	mem_mappings.mem_chunks = NULL;
+	mem_mappings.count = 0;
+	uint64_t event_counter = 1;
+	if (write(mig_efd, &event_counter, sizeof(event_counter)) < 0) {
+		fprintf(stderr, "[ERROR] Could not request the guest's free "
+				"list - %d (%s) - Abort!\n",
+				errno,
+				strerror(errno));
+		return;
+	}
+
+	/* wait for mem_mappings */
+	sem_wait(&mig_sem);
 }
 
 void sigterm_handler(int signum)

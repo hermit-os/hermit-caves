@@ -31,9 +31,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <semaphore.h>
-#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "uhyve-migration.h"
@@ -54,6 +54,7 @@ mig_params_t mig_params = {
 };
 
 extern mem_mappings_t mem_mappings;
+
 /**
  * \brief Generates a setter for a migration parameter
  *
@@ -310,57 +311,40 @@ void close_migration_channel(void)
 
 
 /**
- * \brief Generates the guest's mem_mappings based on its free list
+ * \brief Sends the memory regions to be registered at the destination
+ *
+ * \param guest_physical_memory chunks of the guest-physical memory
+ * \param mem_mappings allocated memory regions
  */
-void generate_mem_mappings(void)
+void send_mem_regions(mem_mappings_t guest_physical_memory, mem_mappings_t mem_mappings)
 {
-	/* request mem_mappings */
-	fprintf(stderr, "[INFO] Requsting guest's free list ...\n");
-	mem_mappings.mem_chunks = NULL;
-	mem_mappings.count = 0;
-	uint64_t event_counter = 1;
-	if (write(mig_efd, &event_counter, sizeof(event_counter)) < 0) {
-		fprintf(stderr, "[ERROR] Could not request the guest's free "
-				"list - %d (%s) - "
-				"(filedes = %d; buf = 0x%x; nbyte = %u). "
-				"Abort!\n",
-				errno,
-				strerror(errno),
-				mig_efd,
-				&event_counter,
-				sizeof(event_counter));
-		return;
+	/* send to destination */
+	if ((mig_params.type == MIG_TYPE_LIVE) || (mem_mappings.count == 0)) {
+		send_data(&(guest_physical_memory.count), sizeof(size_t));
+		send_data(guest_physical_memory.mem_chunks, guest_physical_memory.count*sizeof(mem_chunk_t));
+	} else {
+		send_data(&(mem_mappings.count), sizeof(size_t));
+		send_data(mem_mappings.mem_chunks, mem_mappings.count*sizeof(mem_chunk_t));
 	}
-
-	/* wait for mem_mappings */
-	sem_wait(&mig_sem);
 }
 
-
-#ifndef __RDMA_MIGRATION__
-void send_guest_mem(bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+/**
+ * \brief Receives the memory regions to be registered at the destination
+ *
+ * \param mem_mappings memory regions to be registered
+ */
+void recv_mem_regions(mem_mappings_t *mem_mappings)
 {
-	/* determine migration mode */
-	switch (mig_params.mode) {
-	case MIG_MODE_INCREMENTAL_DUMP:
-		fprintf(stderr, "ERROR: Incremental dumps currently not supported via TCP/IP. Fallback to complete dump!\n");
-	case MIG_MODE_COMPLETE_DUMP:
-		send_data(guest_mem, guest_size);
-		break;
-	default:
-		fprintf(stderr, "ERROR: Unknown migration mode. Abort!\n");
-		exit(EXIT_FAILURE);
-	}
+	/* receive the number of memory regions */
+	mem_mappings->count = 0;
+        mem_mappings->mem_chunks = NULL;
+	recv_data(&(mem_mappings->count), sizeof(mem_mappings->count));
 
-	fprintf(stderr, "Guest memory sent!\n");
+	/* receive the region info */
+	size_t recv_bytes = mem_mappings->count*sizeof(mem_chunk_t);
+	mem_mappings->mem_chunks = (mem_chunk_t*)malloc(recv_bytes);
+	recv_data(mem_mappings->mem_chunks, recv_bytes);
 }
-
-void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
-{
-	recv_data(guest_mem, guest_size);
-	fprintf(stderr, "Guest memory received!\n");
-}
-#endif /* __RDMA_MIGRATION__ */
 
 #else
 

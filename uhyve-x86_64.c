@@ -120,7 +120,6 @@
 
 // define this macro to create checkpoints with KVM's dirty log
 //#define USE_DIRTY_LOG
-#define MIG_ITERS 4
 
 #define MAX_FNAME       256
 
@@ -230,6 +229,7 @@ extern __thread uint32_t cpuid;
 
 extern vcpu_state_t *vcpu_thread_states;
 extern mem_mappings_t mem_mappings;
+extern mem_mappings_t guest_physical_memory;
 
 static inline void show_dtable(const char *name, struct kvm_dtable *dtable)
 {
@@ -440,23 +440,27 @@ static void setup_cpuid(int kvm, int vcpufd)
 	free(kvm_cpuid);
 }
 
-static size_t prepare_mem_chunk_info(mem_chunk_t **mem_chunks) {
-	size_t mem_chunk_cnt = 0;
+/**
+ * \brief Fills mem_mappings with chunks of guest-physical memory
+ */
+static inline void
+determine_guest_physical_memory_regions(mem_mappings_t *mem_mappings)
+{
 	if (guest_size < KVM_32BIT_GAP_START) {
-		mem_chunk_cnt = 1;
-		*mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_chunk_cnt);
-		(*mem_chunks)[0].ptr = 0;
-		(*mem_chunks)[0].size = guest_size;
+		mem_mappings->count = 1;
+		mem_mappings->mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_mappings->count);
+		mem_mappings->mem_chunks[0].ptr = 0;
+		mem_mappings->mem_chunks[0].size = guest_size;
 	} else {
-		mem_chunk_cnt = 2;
-		*mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_chunk_cnt);
-		(*mem_chunks)[0].ptr = 0;
-		(*mem_chunks)[0].size = KVM_32BIT_GAP_START;
-		(*mem_chunks)[1].ptr = (uint8_t*)((uint64_t)(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
-		(*mem_chunks)[1].size = (uint64_t)guest_size - (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE);
+		mem_mappings->count = 2;
+		mem_mappings->mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_mappings->count);
+		mem_mappings->mem_chunks[0].ptr = 0;
+		mem_mappings->mem_chunks[0].size = KVM_32BIT_GAP_START;
+		mem_mappings->mem_chunks[1].ptr = (uint8_t*)((uint64_t)(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
+		mem_mappings->mem_chunks[1].size = (uint64_t)guest_size - (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE);
 	}
 
-	return mem_chunk_cnt;
+	return;
 }
 
 
@@ -908,8 +912,8 @@ void *migration_handler(void *arg)
 	size_t i = 0;
 	int sig_caught;
 
+	/* wait for a migration request and connect to the migration server*/
 	while (1) {
-		/* wait for a migration request */
 		sigwait(signal_mask, &sig_caught);
 
 		if (connect_to_server() < 0) {
@@ -928,7 +932,7 @@ void *migration_handler(void *arg)
 		elf_entry,
 		full_checkpoint};
 
-	/* the guest size is calculated at the destination again */
+	/* the guest size is recalculated at the destination */
 	if ((guest_size-KVM_32BIT_GAP_SIZE) >= KVM_32BIT_GAP_START) {
 		metadata.guest_size -= KVM_32BIT_GAP_SIZE;
 	}
@@ -936,27 +940,19 @@ void *migration_handler(void *arg)
 	res = send_data(&metadata, sizeof(migration_metadata_t));
       	fprintf(stderr, "Metadata sent! (%d bytes)\n", res);
 
-	/* prepare info concerning memory chunks */
-	if (get_migration_type() == MIG_TYPE_COLD) {
-		generate_mem_mappings();
-	}
-	if ((get_migration_type() == MIG_TYPE_LIVE) || (mem_mappings.count == 0)) {
-		mem_mappings.count = prepare_mem_chunk_info(&mem_mappings.mem_chunks);
-	}
+	/* determine guest-physical and guest-allocated memory regions */
+	determine_guest_allocations();
+	determine_guest_physical_memory_regions(&guest_physical_memory);
 
-	/* send to destination */
-	send_data(&(mem_mappings.count), sizeof(size_t));
-	send_data(mem_mappings.mem_chunks, mem_mappings.count*sizeof(mem_chunk_t));
+	/* send to the destination */
+	send_mem_regions(guest_physical_memory, mem_mappings);
 
+	/* we can now determine host-local VAs */
+	convert_to_host_virt(&guest_physical_memory);
 	convert_to_host_virt(&mem_mappings);
 
 	/* pre-copy phase */
-	if (get_migration_type() == MIG_TYPE_LIVE) {
-		/* resend rounds */
-		for (i=0; i<MIG_ITERS; ++i) {
-			send_guest_mem(0, mem_mappings.count, mem_mappings.mem_chunks);
-		}
-	}
+	precopy_phase(guest_physical_memory, mem_mappings);
 
 	/* synchronize VCPU threads */
 	assert(vcpu_thread_states == NULL);
@@ -966,18 +962,18 @@ void *migration_handler(void *arg)
 	pthread_barrier_wait(&migration_barrier);
 
 	/* send the final dump */
-	send_guest_mem(1, mem_mappings.count, mem_mappings.mem_chunks);
+	stop_and_copy_phase();
 	fprintf(stderr, "Memory sent! (Guest size: %zu bytes)\n", guest_size);
 
-	/* free mem_mappings info */
+	/* free mem_mappings and guest_physical_memory info */
 	free(mem_mappings.mem_chunks);
 	mem_mappings.count = 0;
+	free(guest_physical_memory.mem_chunks);
+	guest_physical_memory.count = 0;
 
-	/* send CPU state */
+	/* send CPU state and cleanup */
 	res = send_data(vcpu_thread_states, sizeof(vcpu_state_t)*ncores);
       	fprintf(stderr, "CPU state sent! (%d bytes)\n", res);
-
-	/* free vcpu_thread_states */
 	free(vcpu_thread_states);
 	vcpu_thread_states = NULL;
 
@@ -1006,16 +1002,13 @@ int load_migration_data(uint8_t* mem)
 
 
 	/* get memory chunk info from source and convert to host-virt */
-	mem_mappings.count = 0;
-        mem_mappings.mem_chunks = NULL;
-	recv_data(&(mem_mappings.count), sizeof(mem_mappings.count));
-
-	size_t recv_bytes = mem_mappings.count*sizeof(mem_chunk_t);
-	mem_mappings.mem_chunks = (mem_chunk_t*)malloc(recv_bytes);
-	recv_data(mem_mappings.mem_chunks, recv_bytes);
+	recv_mem_regions(&mem_mappings);
 	convert_to_host_virt(&mem_mappings);
 
-	recv_guest_mem(mem_mappings.count, mem_mappings.mem_chunks);
+	/* receive the guest-physical memory */
+	recv_guest_mem(mem_mappings);
+
+	/* cleanup memory mappings info */
 	free(mem_mappings.mem_chunks);
 	mem_mappings.mem_chunks = NULL;
 	mem_mappings.count = 0;
