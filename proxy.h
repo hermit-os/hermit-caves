@@ -50,6 +50,6 @@ int uhyve_loop(int argc, char **argv);
 
 // define some helper functions
 uint32_t get_cpufreq(void);
-ssize_t  pread_in_full(int fd, void *buf, size_t count, off_t offset);
+ssize_t pread_in_full(int fd, void *buf, size_t count, off_t offset);
 
 #endif

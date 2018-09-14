@@ -37,8 +37,8 @@
 #include "proxy.h"
 
 #ifdef __x86_64__
-inline static void
-__cpuid(uint32_t code, uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
+inline static void __cpuid(uint32_t code, uint32_t *a, uint32_t *b, uint32_t *c,
+						   uint32_t *d) {
 	__asm volatile("cpuid"
 				   : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
 				   : "0"(code), "2"(*c));
@@ -51,9 +51,9 @@ static uint32_t get_frequency_from_brand(void) {
 	char cpu_brand[4 * 3 * sizeof(uint32_t) + 1] = {
 		[0 ... 4 * 3 * sizeof(uint32_t)] = 0};
 	uint32_t *bint = (uint32_t *)cpu_brand;
-	uint32_t  index, multiplier = 0;
-	uint32_t  cpu_freq = 0;
-	uint32_t  extended;
+	uint32_t index, multiplier = 0;
+	uint32_t cpu_freq = 0;
+	uint32_t extended;
 
 	__cpuid(0x80000000, &extended, bint + 1, bint + 2, bint + 3);
 	if (extended < 0x80000004) return 0;
@@ -99,9 +99,9 @@ static uint32_t get_frequency_from_brand(void) {
 #endif
 
 uint32_t get_cpufreq(void) {
-	char	 line[128];
+	char line[128];
 	uint32_t freq = 0;
-	char *   match;
+	char *match;
 
 #ifdef __x86_64__
 	freq = get_frequency_from_brand();
@@ -147,7 +147,7 @@ uint32_t get_cpufreq(void) {
 
 ssize_t pread_in_full(int fd, void *buf, size_t count, off_t offset) {
 	ssize_t total = 0;
-	char *  p	 = buf;
+	char *p		  = buf;
 
 	if (count > SSIZE_MAX) {
 		errno = E2BIG;

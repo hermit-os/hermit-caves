@@ -70,20 +70,20 @@
 #ifdef __x86_64__
 #define MAX_MSR_ENTRIES 25
 struct msr_data {
-	struct kvm_msrs		 info;
+	struct kvm_msrs info;
 	struct kvm_msr_entry entries[MAX_MSR_ENTRIES];
 };
 
 typedef struct _vcpu_state {
-	struct msr_data		   msr_data;
-	struct kvm_regs		   regs;
-	struct kvm_sregs	   sregs;
-	struct kvm_fpu		   fpu;
+	struct msr_data msr_data;
+	struct kvm_regs regs;
+	struct kvm_sregs sregs;
+	struct kvm_fpu fpu;
 	struct kvm_lapic_state lapic;
-	struct kvm_xsave	   xsave;
-	struct kvm_xcrs		   xcrs;
+	struct kvm_xsave xsave;
+	struct kvm_xcrs xcrs;
 	struct kvm_vcpu_events events;
-	struct kvm_mp_state	mp_state;
+	struct kvm_mp_state mp_state;
 } vcpu_state_t;
 
 #define typeof __typeof__
@@ -104,35 +104,34 @@ typedef struct _vcpu_state {
 
 /* see also: arch/<type>/mm/memory.c */
 typedef struct free_list {
-	size_t			  start, end;
+	size_t start, end;
 	struct free_list *next;
 	struct free_list *prev;
 } free_list_t;
 
 typedef struct _migration_metadata migration_metadata_t;
 
-void		 print_registers(void);
-void		 timer_handler(int signum);
-void *		 migration_handler(void *arg);
-void		 determine_guest_allocations(void);
-void		 restore_cpu_state(vcpu_state_t cpu_state);
+void print_registers(void);
+void timer_handler(int signum);
+void *migration_handler(void *arg);
+void determine_guest_allocations(void);
+void restore_cpu_state(vcpu_state_t cpu_state);
 vcpu_state_t read_cpu_state(void);
 vcpu_state_t save_cpu_state(void);
-void		 write_cpu_state(void);
-void		 init_cpu_state(uint64_t elf_entry);
-int			 load_kernel(uint8_t *mem, char *path);
-int			 load_checkpoint(uint8_t *mem, char *path);
-int			 load_migration_data(uint8_t *mem);
-void		 wait_for_incomming_migration(migration_metadata_t *metadata,
-										  uint16_t				listen_portno);
-void		 init_kvm_arch(void);
-int			 load_kernel(uint8_t *mem, char *path);
-size_t		 determine_dest_offset(size_t src_addr);
-void		 determine_dirty_pages(
-			void (*save_page_handler)(void *, size_t, void *, size_t));
+void write_cpu_state(void);
+void init_cpu_state(uint64_t elf_entry);
+int load_kernel(uint8_t *mem, char *path);
+int load_checkpoint(uint8_t *mem, char *path);
+int load_migration_data(uint8_t *mem);
+void wait_for_incomming_migration(migration_metadata_t *metadata,
+								  uint16_t listen_portno);
+void init_kvm_arch(void);
+int load_kernel(uint8_t *mem, char *path);
+size_t determine_dest_offset(size_t src_addr);
+void determine_dirty_pages(void (*save_page_handler)(void *, size_t, void *,
+													 size_t));
 void determine_mem_mappings(free_list_t *alloc_list);
-void virt_to_phys(const size_t  virtual_address,
-				  size_t *const physical_address,
+void virt_to_phys(const size_t virtual_address, size_t *const physical_address,
 				  size_t *const physical_address_page_end);
 
 #endif

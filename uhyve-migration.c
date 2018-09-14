@@ -40,11 +40,11 @@
 #include "uhyve.h"
 
 static struct sockaddr_in mig_server;
-static int				  com_sock	= 0;
-static int				  listen_sock = 0;
+static int com_sock	= 0;
+static int listen_sock = 0;
 
 extern sem_t mig_sem;
-extern int   mig_efd;
+extern int mig_efd;
 
 mig_params_t mig_params = {
 	.type	 = MIG_TYPE_COLD,
@@ -67,7 +67,7 @@ extern mem_mappings_t mem_mappings;
 	void set_migration_##param(const char *mig_param_str) {                  \
 		if (mig_param_str == NULL) return;                                   \
                                                                              \
-		int  i;                                                              \
+		int i;                                                               \
 		bool found_param = false;                                            \
 		for (i = 0;                                                          \
 			 i < sizeof(mig_##param##_conv) / sizeof(mig_##param##_conv[0]); \
@@ -118,7 +118,7 @@ void set_migration_params(const char *mig_param_filename) {
 	if (mig_param_filename == NULL) return;
 
 	FILE *mig_param_file = fopen(mig_param_filename, "r");
-	char  tmp_str[MAX_PARAM_STR_LEN];
+	char tmp_str[MAX_PARAM_STR_LEN];
 	fscanf(mig_param_file, "mode: %s\n", tmp_str);
 	set_migration_mode(tmp_str);
 	fscanf(mig_param_file, "type: %s\n", tmp_str);
@@ -175,7 +175,7 @@ void set_migration_target(const char *ip_str, int port) {
  * \brief Connects to a migration target via TCP/IP
  */
 int connect_to_server(void) {
-	int  res = 0;
+	int res = 0;
 	char buf[INET_ADDRSTRLEN];
 	if (inet_ntop(AF_INET,
 				  (const void *)&mig_server.sin_addr,
@@ -211,7 +211,7 @@ int connect_to_server(void) {
  * \param listen_portno the port of the migration socket
  */
 void wait_for_client(uint16_t listen_portno) {
-	int				   client_addr_len = 0, res = 0;
+	int client_addr_len = 0, res = 0;
 	struct sockaddr_in serv_addr;
 	struct sockaddr_in client_addr;
 

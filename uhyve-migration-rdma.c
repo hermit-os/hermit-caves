@@ -66,33 +66,33 @@ typedef enum ib_wr_ids {
 uint64_t cur_wr_id = IB_WR_BASE_ID;
 
 typedef struct qp_info {
-	uint32_t  qpn;
-	uint16_t  lid;
-	uint16_t  psn;
+	uint32_t qpn;
+	uint16_t lid;
+	uint16_t psn;
 	uint32_t *keys;
-	uint64_t  addr;
+	uint64_t addr;
 } qp_info_t;
 
 typedef struct com_hndl {
-	struct ibv_context *	  ctx;		   /* device context */
+	struct ibv_context *ctx;			   /* device context */
 	struct ibv_device_attr_ex dev_attr_ex; /* extended device attributes */
-	struct ibv_port_attr	  port_attr;   /* port attributes */
-	struct ibv_pd *			  pd;		   /* protection domain */
-	struct ibv_mr **		  mrs;		   /* memory regions */
-	struct ibv_cq *			  cq;		   /* completion queue */
-	struct ibv_qp *			  qp;		   /* queue pair */
-	struct ibv_comp_channel * comp_chan;   /* comp. event channel */
-	qp_info_t				  loc_qp_info;
-	qp_info_t				  rem_qp_info;
-	uint8_t					  used_port; /* port of the IB device */
-	uint8_t *				  buf; /* the guest memory (with potential gaps!) */
-	size_t					  mr_cnt; /* number of memory regions */
+	struct ibv_port_attr port_attr;		   /* port attributes */
+	struct ibv_pd *pd;					   /* protection domain */
+	struct ibv_mr **mrs;				   /* memory regions */
+	struct ibv_cq *cq;					   /* completion queue */
+	struct ibv_qp *qp;					   /* queue pair */
+	struct ibv_comp_channel *comp_chan;	/* comp. event channel */
+	qp_info_t loc_qp_info;
+	qp_info_t rem_qp_info;
+	uint8_t used_port; /* port of the IB device */
+	uint8_t *buf;	  /* the guest memory (with potential gaps!) */
+	size_t mr_cnt;	 /* number of memory regions */
 } com_hndl_t;
 
-static com_hndl_t		   com_hndl;
-static struct ibv_send_wr *send_list		= NULL;
-static struct ibv_send_wr *send_list_last   = NULL;
-static size_t			   send_list_length = 0;
+static com_hndl_t com_hndl;
+static struct ibv_send_wr *send_list	  = NULL;
+static struct ibv_send_wr *send_list_last = NULL;
+static size_t send_list_length			  = 0;
 
 /**
  * \brief Prints info of a send_wr
@@ -142,9 +142,9 @@ static void init_com_hndl(mem_mappings_t mem_mappings, bool sender) {
 	com_hndl.buf	= guest_mem;
 	com_hndl.mr_cnt = mem_mappings.count;
 
-	struct ibv_device **device_list		  = NULL;
-	int					num_devices		  = 0;
-	bool				active_port_found = false;
+	struct ibv_device **device_list = NULL;
+	int num_devices					= 0;
+	bool active_port_found			= false;
 
 	/* determine first available device */
 	if ((device_list = ibv_get_device_list(&num_devices)) == NULL) {
@@ -496,7 +496,7 @@ static void con_com_buf(void) {
  * \brief Returns the index of the MR enclosing a given mem_chunk
  */
 static inline ssize_t determine_enclosing_mr(void *ptr) {
-	size_t  i   = 0;
+	size_t i	= 0;
 	ssize_t res = -1;
 	for (i = 0; i < com_hndl.mr_cnt; ++i) {
 		size_t cur_mr_start = (size_t)com_hndl.mrs[i]->addr;
@@ -516,7 +516,7 @@ static inline ssize_t determine_enclosing_mr(void *ptr) {
 static void prefetch_mem_mappings(mem_mappings_t mem_mappings) {
 	int i, j, ret;
 	for (i = 0; i < mem_mappings.count; ++i) {
-		void * cur_ptr  = mem_mappings.mem_chunks[i].ptr;
+		void *cur_ptr   = mem_mappings.mem_chunks[i].ptr;
 		size_t cur_size = mem_mappings.mem_chunks[i].size;
 
 		/* find enclosing MR
@@ -659,9 +659,7 @@ static inline void append_to_send_list(struct ibv_send_wr *send_wr) {
  * global send_list. It sets the source/destination information and sets the
  * IBV_SEND_SIGNALED flag as appropriate.
  */
-static void create_send_list_entry(void * addr,
-								   size_t addr_size,
-								   void * page,
+static void create_send_list_entry(void *addr, size_t addr_size, void *page,
 								   size_t page_size) {
 	/* create work request */
 	struct ibv_send_wr *send_wr = prepare_send_list_elem();
@@ -747,7 +745,7 @@ static inline void cleanup_send_list(void) {
 static inline void process_send_list(void) {
 	/* we have to call ibv_post_send() as long as 'send_list' contains elements
 	 */
-	struct ibv_wc		wc;
+	struct ibv_wc wc;
 	struct ibv_send_wr *remaining_send_wr = NULL;
 	do {
 		/* send data */
@@ -806,7 +804,7 @@ static inline void process_send_list(void) {
  */
 static inline void enqueue_all_mrs(void) {
 	uint64_t max_msg_sz = com_hndl.port_attr.max_msg_sz;
-	int		 i			= 0;
+	int i				= 0;
 
 	/* send all MRs */
 	for (i = 0; i < com_hndl.mr_cnt; ++i) {
@@ -915,7 +913,7 @@ void precopy_phase(mem_mappings_t guest_mem, mem_mappings_t mem_mappings) {
  * destination.
  */
 void stop_and_copy_phase(void) {
-	int			res = 0, i = 0;
+	int res = 0, i = 0;
 	static bool ib_initialized = false;
 
 	/* determine migration mode */
@@ -987,12 +985,12 @@ void recv_guest_mem(mem_mappings_t mem_mappings) {
 	}
 
 	/* post recv matching IBV_RDMA_WRITE_WITH_IMM */
-	struct ibv_cq *		ev_cq;
-	void *				ev_ctx;
-	struct ibv_sge		sg;
-	struct ibv_recv_wr  recv_wr;
+	struct ibv_cq *ev_cq;
+	void *ev_ctx;
+	struct ibv_sge sg;
+	struct ibv_recv_wr recv_wr;
 	struct ibv_recv_wr *bad_wr;
-	uint32_t			recv_buf = 0;
+	uint32_t recv_buf = 0;
 
 	memset(&sg, 0, sizeof(sg));
 	sg.addr   = (uintptr_t)&recv_buf;

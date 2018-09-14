@@ -70,13 +70,13 @@ static const uint8_t int3 = 0xcc;
 
 struct breakpoint_t {
 	gdb_breakpoint_type type;
-	uint64_t			addr;
-	size_t				len;
-	uint32_t			refcount;
+	uint64_t addr;
+	size_t len;
+	uint32_t refcount;
 #ifdef __aarch64__
 	uint32_t saved_insn;
 #else
-	uint8_t  saved_insn; /* for software breakpoints */
+	uint8_t saved_insn; /* for software breakpoints */
 #endif
 
 	SLIST_ENTRY(breakpoint_t) entries;
@@ -93,25 +93,21 @@ static uint32_t nr_hw_breakpoints = 0;
 /* Stepping is disabled by default. */
 static bool stepping = false;
 
-static int		  socket_fd  = 0;
-static int		  portno	 = 1234; /* Default port number */
+static int socket_fd		 = 0;
+static int portno			 = 1234; /* Default port number */
 static const char hexchars[] = "0123456789abcdef";
 
 #define BUFMAX 4096
-static char			 in_buffer[BUFMAX];
+static char in_buffer[BUFMAX];
 static unsigned char registers[BUFMAX];
 
 /* uhyve variables */
-extern size_t   guest_size;
+extern size_t guest_size;
 extern uint8_t *guest_mem;
 extern uint32_t ncores;
 
-void *uhyve_checked_gpa_p(uint64_t	gpa,
-						  size_t	  sz,
-						  uint8_t *   chk_guest_mem,
-						  size_t	  chk_guest_size,
-						  const char *file,
-						  int		  line);
+void *uhyve_checked_gpa_p(uint64_t gpa, size_t sz, uint8_t *chk_guest_mem,
+						  size_t chk_guest_size, const char *file, int line);
 
 /* The actual error code is ignored by GDB, so any number will do. */
 #define GDB_ERROR_MSG "E01"
@@ -131,7 +127,7 @@ static int hex(unsigned char ch) {
  * buf. Returns a pointer to the last char put in buf (null).
  */
 static char *mem2hex(const unsigned char *mem, char *buf, size_t count) {
-	size_t		  i;
+	size_t i;
 	unsigned char ch;
 
 	for (i = 0; i < count; i++) {
@@ -147,9 +143,9 @@ static char *mem2hex(const unsigned char *mem, char *buf, size_t count) {
  * Converts the hex string in buf into binary in mem.
  * Returns a pointer to the character AFTER the last byte written.
  */
-static unsigned char *
-hex2mem(const char *buf, unsigned char *mem, size_t count) {
-	size_t		  i;
+static unsigned char *hex2mem(const char *buf, unsigned char *mem,
+							  size_t count) {
+	size_t i;
 	unsigned char ch;
 
 	assert(strlen(buf) >= (2 * count));
@@ -163,12 +159,12 @@ hex2mem(const char *buf, unsigned char *mem, size_t count) {
 }
 
 static int wait_for_connect(void) {
-	int				   listen_socket_fd;
+	int listen_socket_fd;
 	struct sockaddr_in server_addr, client_addr;
-	struct protoent *  protoent;
-	struct in_addr	 ip_addr;
-	socklen_t		   len;
-	int				   opt;
+	struct protoent *protoent;
+	struct in_addr ip_addr;
+	socklen_t len;
+	int opt;
 
 	listen_socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_socket_fd == -1) {
@@ -234,7 +230,7 @@ static inline int send_char(char ch) {
 
 static char recv_char(void) {
 	unsigned char ch;
-	int			  ret;
+	int ret;
 
 	ret = recv(socket_fd, &ch, 1, 0);
 	if (ret < 0) {
@@ -260,11 +256,11 @@ static char recv_char(void) {
  * Returns a null terminated string.
  */
 static char *recv_packet(void) {
-	char *		  buffer = &in_buffer[0];
+	char *buffer = &in_buffer[0];
 	unsigned char checksum;
 	unsigned char xmitcsum;
-	char		  ch;
-	int			  count;
+	char ch;
+	int count;
 
 	while (1) {
 		/* wait around for the start character, ignore all other characters */
@@ -333,8 +329,8 @@ static char *recv_packet(void) {
  */
 static void send_packet_no_ack(char *buffer) {
 	unsigned char checksum;
-	int			  count;
-	char		  ch;
+	int count;
+	char ch;
 
 	/*
 	 * We ignore all send_char errors as we either: (1) care about sending our
@@ -411,7 +407,7 @@ static void send_response(char code, int sigval, bool wait_for_ack) {
 
 static void gdb_handle_query(char *packet) {
 	static uint64_t thread_counter = 0;
-	char			obuf[BUFMAX];
+	char obuf[BUFMAX];
 
 	if (ncores > 1) {
 		if (strcmp(packet, "qfThreadInfo") == 0) {
@@ -437,16 +433,16 @@ static void gdb_handle_query(char *packet) {
 
 static void gdb_handle_exception(int vcpufd, int sigval) {
 	char *packet;
-	char  obuf[BUFMAX];
+	char obuf[BUFMAX];
 
 	/* Notify the debugger of our last signal */
 	send_response('S', sigval, true);
 
 	for (;;) {
-		uint64_t			addr = 0, result;
+		uint64_t addr = 0, result;
 		gdb_breakpoint_type type;
-		size_t				len;
-		int					command, ret;
+		size_t len;
+		int command, ret;
 
 		packet = recv_packet();
 		if (packet == NULL)
@@ -696,16 +692,16 @@ static int kvm_arch_remove_sw_breakpoint(struct breakpoint_t *bp) {
 
 static int uhyve_gdb_update_guest_debug(int vcpufd) {
 	struct kvm_guest_debug dbg = {0};
-	struct breakpoint_t *  bp;
-	const uint8_t		   type_code[] = {
-		 /* Break on instruction execution only. */
-		 [GDB_BREAKPOINT_HW] = 0x0,
-		 /* Break on data writes only. */
-		 [GDB_WATCHPOINT_WRITE] = 0x1,
-		 /* Break on data reads only. */
-		 [GDB_WATCHPOINT_READ] = 0x2,
-		 /* Break on data reads or writes but not instruction fetches. */
-		 [GDB_WATCHPOINT_ACCESS] = 0x3};
+	struct breakpoint_t *bp;
+	const uint8_t type_code[] = {
+		/* Break on instruction execution only. */
+		[GDB_BREAKPOINT_HW] = 0x0,
+		/* Break on data writes only. */
+		[GDB_WATCHPOINT_WRITE] = 0x1,
+		/* Break on data reads only. */
+		[GDB_WATCHPOINT_READ] = 0x2,
+		/* Break on data reads or writes but not instruction fetches. */
+		[GDB_WATCHPOINT_ACCESS] = 0x3};
 	const uint8_t len_code[] = {/*
 								 * 00 — 1-byte length.
 								 * 01 — 2-byte length.
@@ -716,7 +712,7 @@ static int uhyve_gdb_update_guest_debug(int vcpufd) {
 								[2] = 0x1,
 								[4] = 0x3,
 								[8] = 0x2};
-	int			  n			 = 0;
+	int n					 = 0;
 
 	if (stepping) dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
 
@@ -751,8 +747,8 @@ static int uhyve_gdb_update_guest_debug(int vcpufd) {
 	return 0;
 }
 
-static struct breakpoint_t *
-bp_list_find(gdb_breakpoint_type type, uint64_t addr, size_t len) {
+static struct breakpoint_t *bp_list_find(gdb_breakpoint_type type,
+										 uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	switch (type) {
@@ -784,8 +780,8 @@ bp_list_find(gdb_breakpoint_type type, uint64_t addr, size_t len) {
  * created breakpoint. Returns NULL in case of failure or if we reached the max
  * number of allowed hardware breakpoints (4).
  */
-static struct breakpoint_t *
-bp_list_insert(gdb_breakpoint_type type, uint64_t addr, size_t len) {
+static struct breakpoint_t *bp_list_insert(gdb_breakpoint_type type,
+										   uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	bp = bp_list_find(type, addr, len);
@@ -862,7 +858,7 @@ static int bp_list_remove(gdb_breakpoint_type type, uint64_t addr, size_t len) {
 
 int uhyve_gdb_read_registers(int vcpufd, uint8_t *registers, size_t *len) {
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
-	int					   ret;
+	int ret;
 
 	if (*len < sizeof(struct uhyve_gdb_regs)) return -1;
 
@@ -872,8 +868,8 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t *registers, size_t *len) {
 	/* There is no KVM_GET_REGS for aarch64, so we need to grab the registers
 	 * one by one */
 	struct kvm_one_reg reg;
-	uint64_t		   data;
-	uint32_t		   data32;
+	uint64_t data;
+	uint32_t data32;
 
 	reg.addr = (uint64_t)&data32;
 	reg.id   = ARM64_CORE_REG(regs.pstate);
@@ -895,7 +891,7 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t *registers, size_t *len) {
 		gregs->x[i] = data;
 	}
 #else /* x86-64 */
-	struct kvm_regs  kregs;
+	struct kvm_regs kregs;
 	struct kvm_sregs sregs;
 
 	kvm_ioctl(vcpufd, KVM_GET_REGS, &kregs);
@@ -932,14 +928,14 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t *registers, size_t *len) {
 
 int uhyve_gdb_write_registers(int vcpufd, uint8_t *registers, size_t len) {
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
-	int					   ret;
+	int ret;
 
 	if (len < sizeof(struct uhyve_gdb_regs)) return -1;
 
 #ifdef __aarch64__
 	struct kvm_one_reg reg;
-	uint64_t		   data;
-	uint32_t		   data32;
+	uint64_t data;
+	uint32_t data32;
 	reg.addr = (uint64_t)&data32;
 
 	reg.id = ARM64_CORE_REG(regs.pstate);
@@ -962,7 +958,7 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t *registers, size_t len) {
 		kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
 	}
 #else /* x86-64 */
-	struct kvm_regs  kregs;
+	struct kvm_regs kregs;
 	struct kvm_sregs sregs;
 
 	/* Let's read all registers just in case we miss filling one of them. */
@@ -1002,10 +998,8 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t *registers, size_t len) {
 	return 0;
 }
 
-int uhyve_gdb_add_breakpoint(int				 vcpufd,
-							 gdb_breakpoint_type type,
-							 uint64_t			 addr,
-							 size_t				 len) {
+int uhyve_gdb_add_breakpoint(int vcpufd, gdb_breakpoint_type type,
+							 uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	assert(type < GDB_BREAKPOINT_MAX);
@@ -1026,10 +1020,8 @@ int uhyve_gdb_add_breakpoint(int				 vcpufd,
 	return 0;
 }
 
-int uhyve_gdb_remove_breakpoint(int					vcpufd,
-								gdb_breakpoint_type type,
-								uint64_t			addr,
-								size_t				len) {
+int uhyve_gdb_remove_breakpoint(int vcpufd, gdb_breakpoint_type type,
+								uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	assert(type < GDB_BREAKPOINT_MAX);
@@ -1063,9 +1055,8 @@ int uhyve_gdb_disable_ss(int vcpufd) {
 }
 
 /* Convert a guest virtual address into the correspondign physical address */
-int uhyve_gdb_guest_virt_to_phys(int			vcpufd,
-								 const uint64_t virt,
-								 uint64_t *		phys) {
+int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt,
+								 uint64_t *phys) {
 #ifdef __aarch64__
 	*phys = aarch64_virt_to_phys(virt);
 #else

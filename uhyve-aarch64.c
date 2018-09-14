@@ -92,28 +92,28 @@
 
 static bool cap_irqfd	 = false;
 static bool cap_read_only = false;
-static int  gic_fd		  = -1;
+static int gic_fd		  = -1;
 
 static uint64_t static_mem_size  = 0;
 static uint64_t static_mem_start = 0;
 
-extern size_t					guest_size;
-extern uint64_t					elf_entry;
-extern uint8_t *				klog;
-extern bool						verbose;
-extern uint32_t					ncores;
-extern uint8_t *				guest_mem;
-extern size_t					guest_size;
-extern int						kvm, vmfd, netfd, efd;
-extern uint8_t *				mboot;
+extern size_t guest_size;
+extern uint64_t elf_entry;
+extern uint8_t *klog;
+extern bool verbose;
+extern uint32_t ncores;
+extern uint8_t *guest_mem;
+extern size_t guest_size;
+extern int kvm, vmfd, netfd, efd;
+extern uint8_t *mboot;
 extern __thread struct kvm_run *run;
-extern __thread int				vcpufd;
-extern __thread uint32_t		cpuid;
+extern __thread int vcpufd;
+extern __thread uint32_t cpuid;
 
 /* Walk the guest page table to translate a guest virtual into a guest physical
  * address. This works only for 4KB granule and 4KB pages */
 uint64_t aarch64_virt_to_phys(uint64_t vaddr) {
-	uint64_t  pt0_index, pt1_index, pt2_index, pt3_index, paddr;
+	uint64_t pt0_index, pt1_index, pt2_index, pt3_index, paddr;
 	uint64_t *pt0_addr, *pt1_addr, *pt2_addr, *pt3_addr;
 
 	/* There is a direct virt to phys mapping for all the static memory, so
@@ -151,11 +151,10 @@ uint64_t aarch64_virt_to_phys(uint64_t vaddr) {
 	return paddr;
 }
 
-static void virt_to_phys_for_table(const size_t  virtual_address,
+static void virt_to_phys_for_table(const size_t virtual_address,
 								   size_t *const physical_address,
 								   size_t *const physical_address_page_end,
-								   size_t *const table,
-								   const size_t  level) {
+								   size_t *const table, const size_t level) {
 	const size_t index =
 		virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
 	const size_t page_mask =
@@ -171,7 +170,7 @@ static void virt_to_phys_for_table(const size_t  virtual_address,
 			*physical_address		   = phy | off;
 			*physical_address_page_end = phy + page_size;
 		} else {
-			const size_t  phy	  = table[index] & PT_ADDR_MASK;
+			const size_t phy	   = table[index] & PT_ADDR_MASK;
 			size_t *const subtable = (size_t *)(guest_mem + phy);
 
 			virt_to_phys_for_table(virtual_address,
@@ -183,8 +182,7 @@ static void virt_to_phys_for_table(const size_t  virtual_address,
 	}
 }
 
-void virt_to_phys(const size_t  virtual_address,
-				  size_t *const physical_address,
+void virt_to_phys(const size_t virtual_address, size_t *const physical_address,
 				  size_t *const physical_address_page_end) {
 	size_t *const pl0 = (size_t *)(guest_mem + elf_entry + PAGE_SIZE);
 
@@ -197,7 +195,7 @@ void virt_to_phys(const size_t  virtual_address,
 
 void print_registers(void) {
 	struct kvm_one_reg reg;
-	uint64_t		   data;
+	uint64_t data;
 
 	fprintf(stderr, "\n Dump state of CPU %d\n\n", cpuid);
 	fprintf(stderr, " Registers\n");
@@ -268,7 +266,7 @@ int load_migration_data(uint8_t *mem) {
 }
 
 void wait_for_incomming_migration(migration_metadata_t *metadata,
-								  uint16_t				listen_portno) {
+								  uint16_t listen_portno) {
 	err(1, "Checkpointing is currently not supported!");
 }
 
@@ -301,7 +299,7 @@ void init_cpu_state(uint64_t elf_entry) {
 	kvm_ioctl(vcpufd, KVM_SET_MP_STATE, &mp_state);
 
 	struct kvm_one_reg reg;
-	uint64_t		   data;
+	uint64_t data;
 
 	/* pstate = all interrupts masked */
 	data	 = PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1h;
@@ -331,8 +329,8 @@ void init_cpu_state(uint64_t elf_entry) {
 	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
 
 	if (gic_fd > 0) {
-		int					   lines		= 1;
-		uint32_t			   nr_irqs		= lines * 32 + GIC_SPI_IRQ_BASE;
+		int lines							= 1;
+		uint32_t nr_irqs					= lines * 32 + GIC_SPI_IRQ_BASE;
 		struct kvm_device_attr nr_irqs_attr = {
 			.group = KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
 			.addr  = (uint64_t)&nr_irqs,
@@ -355,7 +353,7 @@ void init_cpu_state(uint64_t elf_entry) {
 /* Return 1 if guest fiqs are enabled, 0 if the aren't */
 int get_fiq_status(void) {
 	struct kvm_one_reg reg;
-	uint64_t		   data;
+	uint64_t data;
 	reg.addr = (uint64_t)&data;
 
 	reg.id = ARM64_CORE_REG(regs.pstate);
@@ -367,7 +365,7 @@ int get_fiq_status(void) {
 /* disable guest fiqs */
 void mask_fiqs(void) {
 	struct kvm_one_reg reg;
-	uint64_t		   data;
+	uint64_t data;
 	reg.addr = (uint64_t)&data;
 
 	reg.id = ARM64_CORE_REG(regs.pstate);
@@ -381,7 +379,7 @@ void mask_fiqs(void) {
 /* Enable guest fiqs */
 void unmask_fiqs(void) {
 	struct kvm_one_reg reg;
-	uint64_t		   data;
+	uint64_t data;
 	reg.addr = (uint64_t)&data;
 
 	reg.id = ARM64_CORE_REG(regs.pstate);
@@ -502,11 +500,11 @@ void init_kvm_arch(void) {
 }
 
 int load_kernel(uint8_t *mem, char *path) {
-	Elf64_Ehdr  hdr;
+	Elf64_Ehdr hdr;
 	Elf64_Phdr *phdr = NULL;
-	size_t		buflen;
-	size_t		pstart = 0;
-	int			fd, ret;
+	size_t buflen;
+	size_t pstart = 0;
+	int fd, ret;
 
 	fd = open(path, O_RDONLY);
 	if (fd == -1) {
@@ -546,10 +544,10 @@ int load_kernel(uint8_t *mem, char *path) {
 	 * p_offset, and copy that into in memory.
 	 */
 	for (Elf64_Half ph_i = 0; ph_i < hdr.e_phnum; ph_i++) {
-		uint64_t paddr  = phdr[ph_i].p_paddr;
-		size_t   offset = phdr[ph_i].p_offset;
-		size_t   filesz = phdr[ph_i].p_filesz;
-		size_t   memsz  = phdr[ph_i].p_memsz;
+		uint64_t paddr = phdr[ph_i].p_paddr;
+		size_t offset  = phdr[ph_i].p_offset;
+		size_t filesz  = phdr[ph_i].p_filesz;
+		size_t memsz   = phdr[ph_i].p_memsz;
 
 		if (phdr[ph_i].p_type != PT_LOAD) continue;
 

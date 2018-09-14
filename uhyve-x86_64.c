@@ -206,25 +206,25 @@ static bool cap_vapic				= false;
 
 FILE *chk_file = NULL;
 
-extern size_t					guest_size;
-extern pthread_barrier_t		barrier;
-extern pthread_barrier_t		migration_barrier;
-extern pthread_t *				vcpu_threads;
-extern uint64_t					elf_entry;
-extern uint8_t *				klog;
-extern bool						verbose;
-extern bool						full_checkpoint;
-extern uint32_t					no_checkpoint;
-extern uint32_t					ncores;
-extern uint8_t *				guest_mem;
-extern size_t					guest_size;
-extern int						kvm, vmfd, netfd, efd, mig_efd;
-extern uint8_t *				mboot;
+extern size_t guest_size;
+extern pthread_barrier_t barrier;
+extern pthread_barrier_t migration_barrier;
+extern pthread_t *vcpu_threads;
+extern uint64_t elf_entry;
+extern uint8_t *klog;
+extern bool verbose;
+extern bool full_checkpoint;
+extern uint32_t no_checkpoint;
+extern uint32_t ncores;
+extern uint8_t *guest_mem;
+extern size_t guest_size;
+extern int kvm, vmfd, netfd, efd, mig_efd;
+extern uint8_t *mboot;
 extern __thread struct kvm_run *run;
-extern __thread int				vcpufd;
-extern __thread uint32_t		cpuid;
+extern __thread int vcpufd;
+extern __thread uint32_t cpuid;
 
-extern vcpu_state_t * vcpu_thread_states;
+extern vcpu_state_t *vcpu_thread_states;
 extern mem_mappings_t mem_mappings;
 extern mem_mappings_t guest_physical_memory;
 
@@ -254,8 +254,8 @@ static inline void show_segment(const char *name, struct kvm_segment *seg) {
 		seg->avl);
 }
 
-static void
-show_registers(int id, struct kvm_regs *regs, struct kvm_sregs *sregs) {
+static void show_registers(int id, struct kvm_regs *regs,
+						   struct kvm_sregs *sregs) {
 	size_t cr0, cr2, cr3;
 	size_t cr4, cr8;
 	size_t rax, rbx, rcx;
@@ -265,7 +265,7 @@ show_registers(int id, struct kvm_regs *regs, struct kvm_sregs *sregs) {
 	size_t r13, r14, r15;
 	size_t rip, rsp;
 	size_t rflags;
-	int	i;
+	int i;
 
 	rflags = regs->rflags;
 	rip	= regs->rip;
@@ -341,7 +341,7 @@ show_registers(int id, struct kvm_regs *regs, struct kvm_sregs *sregs) {
 }
 
 void print_registers(void) {
-	struct kvm_regs  regs;
+	struct kvm_regs regs;
 	struct kvm_sregs sregs;
 
 	kvm_ioctl(vcpufd, KVM_GET_SREGS, &sregs);
@@ -388,7 +388,7 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem) {
 	uint64_t *pml4  = (uint64_t *)(mem + BOOT_PML4);
 	uint64_t *pdpte = (uint64_t *)(mem + BOOT_PDPTE);
 	uint64_t *pde   = (uint64_t *)(mem + BOOT_PDE);
-	uint64_t  paddr;
+	uint64_t paddr;
 
 	/*
 	 * For simplicity we currently use 2MB pages and only a single
@@ -409,9 +409,9 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem) {
 	sregs->cr0 |= X86_CR0_PG;
 }
 
-static void
-setup_system_gdt(struct kvm_sregs *sregs, uint8_t *mem, uint64_t off) {
-	uint64_t *		   gdt = (uint64_t *)(mem + off);
+static void setup_system_gdt(struct kvm_sregs *sregs, uint8_t *mem,
+							 uint64_t off) {
+	uint64_t *gdt = (uint64_t *)(mem + off);
 	struct kvm_segment data_seg, code_seg;
 
 	/* flags, base, limit */
@@ -453,7 +453,7 @@ static void setup_system(int vcpufd, uint8_t *mem, uint32_t id) {
 
 static void setup_cpuid(int kvm, int vcpufd) {
 	struct kvm_cpuid2 *kvm_cpuid;
-	unsigned int	   max_entries = 100;
+	unsigned int max_entries = 100;
 
 	// allocate space for cpuid we get from KVM
 	kvm_cpuid = calloc(
@@ -565,7 +565,7 @@ void init_cpu_state(uint64_t elf_entry) {
 	};
 	struct kvm_mp_state mp_state = {KVM_MP_STATE_RUNNABLE};
 	struct {
-		struct kvm_msrs		 info;
+		struct kvm_msrs info;
 		struct kvm_msr_entry entries[MAX_MSR_ENTRIES];
 	} msr_data;
 	struct kvm_msr_entry *msrs = msr_data.entries;
@@ -594,7 +594,7 @@ void init_cpu_state(uint64_t elf_entry) {
 
 vcpu_state_t read_cpu_state(void) {
 	vcpu_state_t cpu_state;
-	char		 fname[MAX_FNAME];
+	char fname[MAX_FNAME];
 	snprintf(
 		fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
 
@@ -627,7 +627,7 @@ void restore_cpu_state(vcpu_state_t cpu_state) {
 }
 
 vcpu_state_t save_cpu_state(void) {
-	int			 n = 0;
+	int n = 0;
 	vcpu_state_t cpu_state;
 
 	/* define the list of required MSRs */
@@ -663,7 +663,7 @@ vcpu_state_t save_cpu_state(void) {
 
 void write_cpu_state(void) {
 	vcpu_state_t cpu_state = save_cpu_state();
-	char		 fname[MAX_FNAME];
+	char fname[MAX_FNAME];
 	snprintf(
 		fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
 
@@ -679,8 +679,8 @@ void write_cpu_state(void) {
 }
 
 void scan_dirty_log(void (*save_page)(void *, size_t, void *, size_t)) {
-	size_t						slot_offset = 0;
-	static struct kvm_dirty_log dlog		= {.slot = 0, .dirty_bitmap = NULL};
+	size_t slot_offset				 = 0;
+	static struct kvm_dirty_log dlog = {.slot = 0, .dirty_bitmap = NULL};
 	size_t dirty_log_size = (guest_size >> PAGE_BITS) / sizeof(size_t);
 
 	// do we create our first checkpoint
@@ -789,8 +789,8 @@ void open_chk_file(char *fname) {
  */
 void determine_mem_mappings(free_list_t *free_list) {
 	/* determine list length */
-	size_t		 free_list_length = 0;
-	free_list_t *cur			  = free_list;
+	size_t free_list_length = 0;
+	free_list_t *cur		= free_list;
 	for (free_list_length = 0; (size_t)cur != (size_t)guest_mem;
 		 ++free_list_length) {
 		cur = virt_to_phys_with_offset(cur->next);
@@ -843,16 +843,14 @@ void write_chk_file(void *addr, size_t bytes) {
 	}
 }
 
-void write_mem_page_to_chk_file(void * entry,
-								size_t entry_size,
-								void * page,
+void write_mem_page_to_chk_file(void *entry, size_t entry_size, void *page,
 								size_t page_size) {
 	write_chk_file(entry, entry_size);
 	write_chk_file(page, page_size);
 }
 
-void determine_dirty_pages(
-	void (*save_page_handler)(void *, size_t, void *, size_t)) {
+void determine_dirty_pages(void (*save_page_handler)(void *, size_t, void *,
+													 size_t)) {
 #ifdef USE_DIRTY_LOG
 	scan_dirty_log(save_page_handler);
 #else
@@ -862,8 +860,8 @@ void determine_dirty_pages(
 
 void timer_handler(int signum) {
 
-	struct stat	st = {0};
-	char		   fname[MAX_FNAME];
+	struct stat st = {0};
+	char fname[MAX_FNAME];
 	struct timeval begin, end;
 
 	if (verbose) gettimeofday(&begin, NULL);
@@ -933,9 +931,9 @@ void timer_handler(int signum) {
 
 void *migration_handler(void *arg) {
 	sigset_t *signal_mask = (sigset_t *)arg;
-	int		  res		  = 0;
-	size_t	i			  = 0;
-	int		  sig_caught;
+	int res				  = 0;
+	size_t i			  = 0;
+	int sig_caught;
 
 	/* wait for a migration request and connect to the migration server*/
 	while (1) {
@@ -1017,7 +1015,7 @@ void *migration_handler(void *arg) {
 
 int load_migration_data(uint8_t *mem) {
 	size_t paddr = elf_entry;
-	int	res   = 0;
+	int res		 = 0;
 	if (!klog) klog = mem + paddr + 0x5000 - GUEST_OFFSET;
 	if (!mboot) mboot = mem + paddr - GUEST_OFFSET;
 
@@ -1051,12 +1049,12 @@ int load_migration_data(uint8_t *mem) {
 }
 
 int load_checkpoint(uint8_t *mem, char *path) {
-	char		   fname[MAX_FNAME];
-	size_t		   location;
-	size_t		   paddr = elf_entry;
-	int			   ret;
+	char fname[MAX_FNAME];
+	size_t location;
+	size_t paddr = elf_entry;
+	int ret;
 	struct timeval begin, end;
-	uint32_t	   i;
+	uint32_t i;
 
 	if (verbose) gettimeofday(&begin, NULL);
 
@@ -1132,7 +1130,7 @@ int load_checkpoint(uint8_t *mem, char *path) {
 }
 
 void wait_for_incomming_migration(migration_metadata_t *metadata,
-								  uint16_t				listen_portno) {
+								  uint16_t listen_portno) {
 	int res = 0, com_sock = 0;
 
 	wait_for_client(listen_portno);
@@ -1296,11 +1294,11 @@ void init_kvm_arch(void) {
 }
 
 int load_kernel(uint8_t *mem, char *path) {
-	Elf64_Ehdr  hdr;
+	Elf64_Ehdr hdr;
 	Elf64_Phdr *phdr = NULL;
-	size_t		buflen;
-	size_t		pstart = 0;
-	int			fd, ret;
+	size_t buflen;
+	size_t pstart = 0;
+	int fd, ret;
 
 	fd = open(path, O_RDONLY);
 	if (fd == -1) {
@@ -1340,10 +1338,10 @@ int load_kernel(uint8_t *mem, char *path) {
 	 * p_offset, and copy that into in memory.
 	 */
 	for (Elf64_Half ph_i = 0; ph_i < hdr.e_phnum; ph_i++) {
-		uint64_t paddr  = phdr[ph_i].p_paddr;
-		size_t   offset = phdr[ph_i].p_offset;
-		size_t   filesz = phdr[ph_i].p_filesz;
-		size_t   memsz  = phdr[ph_i].p_memsz;
+		uint64_t paddr = phdr[ph_i].p_paddr;
+		size_t offset  = phdr[ph_i].p_offset;
+		size_t filesz  = phdr[ph_i].p_filesz;
+		size_t memsz   = phdr[ph_i].p_memsz;
 
 		if (phdr[ph_i].p_type != PT_LOAD) continue;
 
@@ -1436,11 +1434,10 @@ out:
 	return ret;
 }
 
-static void virt_to_phys_for_table(const size_t  virtual_address,
+static void virt_to_phys_for_table(const size_t virtual_address,
 								   size_t *const physical_address,
 								   size_t *const physical_address_page_end,
-								   size_t *const table,
-								   const size_t  level) {
+								   size_t *const table, const size_t level) {
 	const size_t index =
 		virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
 	const size_t page_mask =
@@ -1455,7 +1452,7 @@ static void virt_to_phys_for_table(const size_t  virtual_address,
 			*physical_address		   = phy | off;
 			*physical_address_page_end = phy + page_size;
 		} else {
-			const size_t  phy	  = table[index] & PAGE_MASK;
+			const size_t phy	   = table[index] & PAGE_MASK;
 			size_t *const subtable = (size_t *)(guest_mem + phy);
 
 			virt_to_phys_for_table(virtual_address,
@@ -1467,8 +1464,7 @@ static void virt_to_phys_for_table(const size_t  virtual_address,
 	}
 }
 
-void virt_to_phys(const size_t  virtual_address,
-				  size_t *const physical_address,
+void virt_to_phys(const size_t virtual_address, size_t *const physical_address,
 				  size_t *const physical_address_page_end) {
 	size_t *const pml4 = (size_t *)(guest_mem + elf_entry + PAGE_SIZE);
 

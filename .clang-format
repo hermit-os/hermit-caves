@@ -8,7 +8,7 @@ AlwaysBreakBeforeMultilineStrings: false
 BreakBeforeBinaryOperators: false
 BreakBeforeTernaryOperators: true
 BreakConstructorInitializersBeforeComma: false
-BinPackParameters: false
+BinPackParameters: true
 BinPackArguments: false
 AlignAfterOpenBracket: Align
 IndentCaseLabels: false
@@ -32,7 +32,7 @@ SpacesInParentheses: false
 UseTab: Always
 AlignEscapedNewlines: Left
 AlignConsecutiveAssignments: true
-AlignConsecutiveDeclarations: true
+AlignConsecutiveDeclarations: false
 ColumnLimit: 80
 AlwaysBreakAfterDefinitionReturnType: None
 PenaltyReturnTypeOnItsOwnLine: 60

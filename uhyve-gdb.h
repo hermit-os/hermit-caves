@@ -55,22 +55,17 @@ int uhyve_gdb_enable_ss(int vcpufd);
 int uhyve_gdb_disable_ss(int vcpufd);
 int uhyve_gdb_read_registers(int vcpufd, uint8_t *reg, size_t *len);
 int uhyve_gdb_write_registers(int vcpufd, uint8_t *reg, size_t len);
-int uhyve_gdb_add_breakpoint(int				 vcpufd,
-							 gdb_breakpoint_type type,
-							 uint64_t			 addr,
-							 size_t				 len);
-int uhyve_gdb_remove_breakpoint(int					vcpufd,
-								gdb_breakpoint_type type,
-								uint64_t			addr,
-								size_t				len);
-int uhyve_gdb_guest_virt_to_phys(int			vcpufd,
-								 const uint64_t virt,
-								 uint64_t *		phys);
+int uhyve_gdb_add_breakpoint(int vcpufd, gdb_breakpoint_type type,
+							 uint64_t addr, size_t len);
+int uhyve_gdb_remove_breakpoint(int vcpufd, gdb_breakpoint_type type,
+								uint64_t addr, size_t len);
+int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt,
+								 uint64_t *phys);
 
 /* interface with uhyve.c */
 void uhyve_gdb_handle_exception(int vcpufd, int sigval);
 void uhyve_gdb_handle_term(void);
-int  uhyve_gdb_init(int vcpufd);
+int uhyve_gdb_init(int vcpufd);
 
 #ifdef __x86_64__
 #include "uhyve-gdb-x86_64.h"

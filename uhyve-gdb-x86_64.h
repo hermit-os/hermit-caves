@@ -71,7 +71,7 @@ struct uhyve_gdb_regs {
 	uint32_t es;
 	uint32_t fs;
 	uint32_t gs;
-	uint8_t  st[8][10];
+	uint8_t st[8][10];
 };
 
 #endif /* UHYVE_GDB_X86_64_H */

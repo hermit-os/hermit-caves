@@ -169,7 +169,7 @@
 
 #define LIST_ENTRY(type)                                              \
 	struct {                                                          \
-		struct type * le_next; /* next element */                     \
+		struct type *le_next;  /* next element */                     \
 		struct type **le_prev; /* address of previous next element */ \
 	}
 
@@ -277,10 +277,10 @@
 /*
  * Simple queue definitions.
  */
-#define SIMPLEQ_HEAD(name, type)                                 \
-	struct name {                                                \
-		struct type * sqh_first; /* first element */             \
-		struct type **sqh_last;  /* addr of last next element */ \
+#define SIMPLEQ_HEAD(name, type)                                \
+	struct name {                                               \
+		struct type *sqh_first; /* first element */             \
+		struct type **sqh_last; /* addr of last next element */ \
 	}
 
 #define SIMPLEQ_HEAD_INITIALIZER(head) \
@@ -554,10 +554,10 @@
 /*
  * Singly-linked Tail queue declarations.
  */
-#define STAILQ_HEAD(name, type)                                   \
-	struct name {                                                 \
-		struct type * stqh_first; /* first element */             \
-		struct type **stqh_last;  /* addr of last next element */ \
+#define STAILQ_HEAD(name, type)                                  \
+	struct name {                                                \
+		struct type *stqh_first; /* first element */             \
+		struct type **stqh_last; /* addr of last next element */ \
 	}
 
 #define STAILQ_HEAD_INITIALIZER(head) \

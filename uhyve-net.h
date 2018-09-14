@@ -33,7 +33,7 @@ typedef struct {
 typedef struct {
 	/* IN */
 	const void *data;
-	size_t		len;
+	size_t len;
 	/* OUT */
 	int ret;
 } __attribute__((packed)) uhyve_netwrite_t;
@@ -54,7 +54,7 @@ typedef struct {
 	int status;
 } __attribute__((packed)) uhyve_netstat_t;
 
-int   uhyve_net_init(const char *hermit_netif);
+int uhyve_net_init(const char *hermit_netif);
 char *uhyve_get_mac(void);
 
 #endif

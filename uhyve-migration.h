@@ -36,7 +36,7 @@
 
 #include <stdbool.h>
 
-extern size_t   guest_size;
+extern size_t guest_size;
 extern uint8_t *guest_mem;
 
 #define MIGRATION_PORT 1337
@@ -48,7 +48,7 @@ typedef enum {
 } mig_mode_t;
 
 const static struct {
-	mig_mode_t  mig_mode;
+	mig_mode_t mig_mode;
 	const char *str;
 } mig_mode_conv[] = {
 	{MIG_MODE_COMPLETE_DUMP, "complete-dump"},
@@ -61,7 +61,7 @@ typedef enum {
 } mig_type_t;
 
 const static struct {
-	mig_type_t  mig_type;
+	mig_type_t mig_type;
 	const char *str;
 } mig_type_conv[] = {
 	{MIG_TYPE_COLD, "cold"},
@@ -71,26 +71,26 @@ const static struct {
 typedef struct _mig_params {
 	mig_type_t type;
 	mig_mode_t mode;
-	bool	   use_odp;
-	bool	   prefetch;
+	bool use_odp;
+	bool prefetch;
 } mig_params_t;
 
 typedef struct _mem_chunk {
-	size_t   size;
+	size_t size;
 	uint8_t *ptr;
 } mem_chunk_t;
 
 typedef struct _mem_mappings {
 	mem_chunk_t *mem_chunks;
-	size_t		 count;
+	size_t count;
 } mem_mappings_t;
 
 typedef struct _migration_metadata {
 	uint32_t ncores;
-	size_t   guest_size;
+	size_t guest_size;
 	uint32_t no_checkpoint;
 	uint64_t elf_entry;
-	bool	 full_checkpoint;
+	bool full_checkpoint;
 } migration_metadata_t;
 
 mig_params_t mig_params;
@@ -101,7 +101,7 @@ mig_type_t get_migration_type(void);
 
 void wait_for_client(uint16_t listen_portno);
 void set_migration_target(const char *ip_str, int port);
-int  connect_to_server(void);
+int connect_to_server(void);
 void close_migration_channel(void);
 
 int recv_data(void *buffer, size_t length);

@@ -39,7 +39,7 @@ static uhyve_netinfo_t netinfo;
 //-----------------------------------------//
 int attach_linux_tap(const char *dev) {
 	struct ifreq ifr;
-	int			 fd, err;
+	int fd, err;
 
 	// @<number> indicates a pre-existing open fd onto the correct device.
 	if (dev[0] == '@') {
@@ -114,7 +114,7 @@ char *uhyve_get_mac(void) { return netinfo.mac_str; }
 //----------------------------------------------//
 
 int uhyve_set_mac(void) {
-	int		mac_is_set = 0;
+	int mac_is_set = 0;
 	uint8_t guest_mac[6];
 
 	char *str = getenv("HERMIT_NETIF_MAC");

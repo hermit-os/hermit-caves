@@ -68,41 +68,41 @@
 #include "uhyve-syscalls.h"
 #include "uhyve.h"
 
-static bool			   restart   = false;
-static bool			   migration = false;
-static pthread_t	   net_thread;
-static int *		   vcpu_fds = NULL;
+static bool restart   = false;
+static bool migration = false;
+static pthread_t net_thread;
+static int *vcpu_fds			= NULL;
 static pthread_mutex_t kvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 extern bool verbose;
 
-static char *	 guest_path		= NULL;
-static bool		  uhyve_gdb_enabled = false;
-size_t			  guest_size		= 0x20000000ULL;
-bool			  full_checkpoint   = false;
+static char *guest_path		  = NULL;
+static bool uhyve_gdb_enabled = false;
+size_t guest_size			  = 0x20000000ULL;
+bool full_checkpoint		  = false;
 pthread_barrier_t barrier;
 pthread_barrier_t migration_barrier;
-pthread_t *		  vcpu_threads  = NULL;
-uint8_t *		  klog			= NULL;
-uint8_t *		  guest_mem		= NULL;
-uint32_t		  no_checkpoint = 0;
-uint32_t		  ncores		= 1;
-uint64_t		  elf_entry;
-int				  kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
-uint8_t *		  mboot			= NULL;
-__thread struct kvm_run *run	= NULL;
-__thread int			 vcpufd = -1;
-__thread uint32_t		 cpuid  = 0;
-static sem_t			 net_sem;
-sem_t					 mig_sem;
+pthread_t *vcpu_threads = NULL;
+uint8_t *klog			= NULL;
+uint8_t *guest_mem		= NULL;
+uint32_t no_checkpoint  = 0;
+uint32_t ncores			= 1;
+uint64_t elf_entry;
+int kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
+uint8_t *mboot				 = NULL;
+__thread struct kvm_run *run = NULL;
+__thread int vcpufd			 = -1;
+__thread uint32_t cpuid		 = 0;
+static sem_t net_sem;
+sem_t mig_sem;
 
-int			  uhyve_argc = -1;
-int			  uhyve_envc = -1;
-char **		  uhyve_argv = NULL;
+int uhyve_argc	= -1;
+int uhyve_envc	= -1;
+char **uhyve_argv = NULL;
 extern char **environ;
-char **		  uhyve_envp = NULL;
+char **uhyve_envp = NULL;
 
-vcpu_state_t *  vcpu_thread_states = NULL;
+vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t signal_mask;
 
 mem_mappings_t mem_mappings			 = {NULL, 0};
@@ -209,7 +209,7 @@ static void uhyve_atexit(void) {
 }
 
 static void *wait_for_packet(void *arg) {
-	int			  ret;
+	int ret;
 	struct pollfd fds = {.fd = netfd, .events = POLLIN, .revents = 0};
 
 	while (1) {
@@ -372,8 +372,8 @@ static int vcpu_loop(void) {
 
 			case UHYVE_PORT_READ: {
 				uhyve_read_t *uhyve_read = (uhyve_read_t *)(guest_mem + raddr);
-				size_t		  bytes_to_read = uhyve_read->len;
-				size_t		  bytes_read	= 0;
+				size_t bytes_to_read	 = uhyve_read->len;
+				size_t bytes_read		 = 0;
 
 				while (bytes_to_read > 0) {
 					size_t physical_address;
@@ -407,7 +407,7 @@ static int vcpu_loop(void) {
 
 			case UHYVE_PORT_OPEN: {
 				uhyve_open_t *uhyve_open = (uhyve_open_t *)(guest_mem + raddr);
-				char		  rpath[PATH_MAX];
+				char rpath[PATH_MAX];
 
 				// forbid to open the kvm device
 				if (realpath((const char *)guest_mem + (size_t)uhyve_open->name,
@@ -495,7 +495,7 @@ static int vcpu_loop(void) {
 			}
 
 			case UHYVE_PORT_CMDSIZE: {
-				int				 i;
+				int i;
 				uhyve_cmdsize_t *val = (uhyve_cmdsize_t *)(guest_mem + raddr);
 
 				val->argc = uhyve_argc;
@@ -510,8 +510,8 @@ static int vcpu_loop(void) {
 			}
 
 			case UHYVE_PORT_CMDVAL: {
-				int				i;
-				char **			argv_ptr, **env_ptr;
+				int i;
+				char **argv_ptr, **env_ptr;
 				uhyve_cmdval_t *val = (uhyve_cmdval_t *)(guest_mem + raddr);
 
 				/* argv */
@@ -631,7 +631,7 @@ static void vcpu_thread_mig_handler(int signum) {
 }
 
 static void *uhyve_thread(void *arg) {
-	size_t			 ret;
+	size_t ret;
 	struct sigaction sa;
 
 	pthread_cleanup_push(uhyve_exit, NULL);
@@ -795,7 +795,7 @@ int uhyve_loop(int argc, char **argv) {
 	const char *hermit_mig_support = getenv("HERMIT_MIGRATION_SUPPORT");
 	const char *hermit_mig_params  = getenv("HERMIT_MIGRATION_PARAMS");
 	const char *hermit_debug	   = getenv("HERMIT_DEBUG");
-	int			ts = 0, i = 0;
+	int ts = 0, i = 0;
 
 	if (hermit_debug && (atoi(hermit_debug) != 0)) uhyve_gdb_enabled = true;
 

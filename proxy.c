@@ -74,20 +74,20 @@ typedef enum { BAREMETAL = 0, QEMU, UHYVE } monitor_t;
 
 bool verbose = false;
 
-static monitor_t	monitor			  = UHYVE;
-static int			sobufsize		  = 131072;
-static unsigned int isle_nr			  = 0;
-static unsigned int port			  = HERMIT_PORT;
-static char			pidname[]		  = "/tmp/hpid-XXXXXX";
-static char			tmpname[]		  = "/tmp/hermit-XXXXXX";
-static char			cmdline[MAX_PATH] = "";
+static monitor_t monitor	  = UHYVE;
+static int sobufsize		  = 131072;
+static unsigned int isle_nr   = 0;
+static unsigned int port	  = HERMIT_PORT;
+static char pidname[]		  = "/tmp/hpid-XXXXXX";
+static char tmpname[]		  = "/tmp/hermit-XXXXXX";
+static char cmdline[MAX_PATH] = "";
 
 extern char **environ;
 
 static void stop_hermit(void);
 static void dump_log(void);
-static int  multi_init(char *path);
-static int  qemu_init(char *path);
+static int multi_init(char *path);
+static int qemu_init(char *path);
 
 static void qemu_fini(void) {
 	FILE *fp = NULL;
@@ -133,7 +133,7 @@ static char *get_append_string(void) {
 }
 
 static int env_init(char *path) {
-	char *			 str;
+	char *str;
 	struct sigaction sINT, sTERM;
 
 	// define action for SIGINT
@@ -184,10 +184,10 @@ static int env_init(char *path) {
 }
 
 static int is_hermit_available(void) {
-	char * line = (char *)malloc(2048);
-	size_t n	= 2048;
-	int	ret  = 0;
-	FILE * file;
+	char *line = (char *)malloc(2048);
+	size_t n   = 2048;
+	int ret	= 0;
+	FILE *file;
 
 	if (!line) {
 		fprintf(stderr, "Not enough memory\n");
@@ -228,7 +228,7 @@ err:
 // wait until HermitCore is sucessfully booted
 static void wait_hermit_available(void) {
 	char buffer[BUF_LEN];
-	int  wd;
+	int wd;
 
 	if (is_hermit_available()) return;
 
@@ -268,13 +268,13 @@ static void wait_hermit_available(void) {
 }
 
 static int qemu_init(char *path) {
-	int   kvm, i = 0;
+	int kvm, i = 0;
 	char *str;
-	char  loader_path[MAX_PATH];
-	char  hostfwd[MAX_PATH];
-	char  monitor_str[MAX_PATH];
-	char  chardev_file[MAX_PATH];
-	char  port_str[MAX_PATH];
+	char loader_path[MAX_PATH];
+	char hostfwd[MAX_PATH];
+	char monitor_str[MAX_PATH];
+	char chardev_file[MAX_PATH];
+	char port_str[MAX_PATH];
 	pid_t qemu_pid;
 	char *qemu_str	= "qemu-system-x86_64";
 	char *qemu_argv[] = {qemu_str,	 "-daemonize", "-display",
@@ -428,10 +428,10 @@ static int qemu_init(char *path) {
 }
 
 static int multi_init(char *path) {
-	int   ret;
+	int ret;
 	char *str;
 	FILE *file;
-	char  isle_path[MAX_PATH];
+	char isle_path[MAX_PATH];
 	char *result;
 
 #ifdef __aarch64__
@@ -501,7 +501,7 @@ static int multi_init(char *path) {
 
 static void dump_log(void) {
 	FILE *file;
-	char  line[2048];
+	char line[2048];
 
 	if (!verbose) return;
 
@@ -530,7 +530,7 @@ static void dump_log(void) {
 
 static void stop_hermit(void) {
 	FILE *file;
-	char  isle_path[MAX_PATH];
+	char isle_path[MAX_PATH];
 
 	fflush(stdout);
 	fflush(stderr);
@@ -553,9 +553,9 @@ static void stop_hermit(void) {
  * this proxy, which mapped these call to Linux system calls.
  */
 int handle_syscalls(int s) {
-	int		sysnr;
+	int sysnr;
 	ssize_t sret;
-	size_t  j;
+	size_t j;
 
 	while (1) {
 		j = 0;
@@ -587,9 +587,9 @@ int handle_syscalls(int s) {
 			break;
 		}
 		case __HERMIT_write: {
-			int	fd;
+			int fd;
 			size_t len;
-			char * buff;
+			char *buff;
 
 			j = 0;
 			while (j < sizeof(fd)) {
@@ -640,8 +640,8 @@ int handle_syscalls(int s) {
 		}
 		case __HERMIT_open: {
 			size_t len;
-			char * fname;
-			int	flags, mode, ret;
+			char *fname;
+			int flags, mode, ret;
 
 			j = 0;
 			while (j < sizeof(len)) {
@@ -711,10 +711,10 @@ int handle_syscalls(int s) {
 			break;
 		}
 		case __HERMIT_read: {
-			int		fd, flag;
-			size_t  len;
+			int fd, flag;
+			size_t len;
 			ssize_t sj;
-			char *  buff;
+			char *buff;
 
 			j = 0;
 			while (j < sizeof(fd)) {
@@ -763,7 +763,7 @@ int handle_syscalls(int s) {
 			break;
 		}
 		case __HERMIT_lseek: {
-			int   fd, whence;
+			int fd, whence;
 			off_t offset;
 
 			j = 0;
@@ -816,8 +816,8 @@ out:
 }
 
 int socket_loop(int argc, char **argv) {
-	int				   i, j, ret, s;
-	int32_t			   magic = HERMIT_MAGIC;
+	int i, j, ret, s;
+	int32_t magic = HERMIT_MAGIC;
 	struct sockaddr_in serv_name;
 
 #if 0
