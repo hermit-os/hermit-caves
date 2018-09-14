@@ -26,46 +26,51 @@
 #ifndef UHYVE_GDB_H
 #define UHYVE_GDB_H
 
-#include <stdint.h>
 #include <inttypes.h>
+#include <stdint.h>
 
 /* GDB breakpoint/watchpoint types */
 typedef enum _gdb_breakpoint_type {
-    /* Do not change these. The values have to match on the GDB client
-     * side. */
-    GDB_BREAKPOINT_SW = 0,
-    GDB_BREAKPOINT_HW,
-    GDB_WATCHPOINT_WRITE,
-    GDB_WATCHPOINT_READ,
-    GDB_WATCHPOINT_ACCESS,
-    GDB_BREAKPOINT_MAX
+	/* Do not change these. The values have to match on the GDB client
+	 * side. */
+	GDB_BREAKPOINT_SW = 0,
+	GDB_BREAKPOINT_HW,
+	GDB_WATCHPOINT_WRITE,
+	GDB_WATCHPOINT_READ,
+	GDB_WATCHPOINT_ACCESS,
+	GDB_BREAKPOINT_MAX
 } gdb_breakpoint_type;
 
-#define GDB_SIGNAL_FIRST         0
-#define GDB_SIGNAL_QUIT          3
-#define GDB_SIGNAL_KILL          9
-#define GDB_SIGNAL_TRAP          5
-#define GDB_SIGNAL_SEGV          11
-#define GDB_SIGNAL_TERM          15
-#define GDB_SIGNAL_IO            23
-#define GDB_SIGNAL_DEFAULT       144
+#define GDB_SIGNAL_FIRST 0
+#define GDB_SIGNAL_QUIT 3
+#define GDB_SIGNAL_KILL 9
+#define GDB_SIGNAL_TRAP 5
+#define GDB_SIGNAL_SEGV 11
+#define GDB_SIGNAL_TERM 15
+#define GDB_SIGNAL_IO 23
+#define GDB_SIGNAL_DEFAULT 144
 
 /* prototypes */
 int uhyve_gdb_enable_ss(int vcpufd);
 int uhyve_gdb_disable_ss(int vcpufd);
 int uhyve_gdb_read_registers(int vcpufd, uint8_t *reg, size_t *len);
 int uhyve_gdb_write_registers(int vcpufd, uint8_t *reg, size_t len);
-int uhyve_gdb_add_breakpoint(int vcpufd, gdb_breakpoint_type type,
-		uint64_t addr, size_t len);
-int uhyve_gdb_remove_breakpoint(int vcpufd, gdb_breakpoint_type type,
-		uint64_t addr, size_t len);
-int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt,
-		uint64_t *phys);
+int uhyve_gdb_add_breakpoint(int				 vcpufd,
+							 gdb_breakpoint_type type,
+							 uint64_t			 addr,
+							 size_t				 len);
+int uhyve_gdb_remove_breakpoint(int					vcpufd,
+								gdb_breakpoint_type type,
+								uint64_t			addr,
+								size_t				len);
+int uhyve_gdb_guest_virt_to_phys(int			vcpufd,
+								 const uint64_t virt,
+								 uint64_t *		phys);
 
 /* interface with uhyve.c */
 void uhyve_gdb_handle_exception(int vcpufd, int sigval);
 void uhyve_gdb_handle_term(void);
-int uhyve_gdb_init(int vcpufd);
+int  uhyve_gdb_init(int vcpufd);
 
 #ifdef __x86_64__
 #include "uhyve-gdb-x86_64.h"

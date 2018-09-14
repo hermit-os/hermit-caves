@@ -13,275 +13,308 @@
  *      may be used to endorse or promote products derived from this
  *      software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifdef __x86_64__
 #define _GNU_SOURCE
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <signal.h>
-#include <limits.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <elf.h>
 #include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <linux/const.h>
+#include <linux/kvm.h>
 #include <poll.h>
-#include <sys/wait.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
+#include <pthread.h>
+#include <sched.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/time.h>
-#include <sys/eventfd.h>
-#include <linux/const.h>
-#include <linux/kvm.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #ifdef HAVE_MSR_INDEX_H
 #include <asm/msr-index.h>
 #else
 /* x86-64 specific MSRs */
-#define MSR_EFER		0xc0000080 /* extended feature register */
-#define MSR_STAR		0xc0000081 /* legacy mode SYSCALL target */
-#define MSR_LSTAR		0xc0000082 /* long mode SYSCALL target */
-#define MSR_CSTAR		0xc0000083 /* compat mode SYSCALL target */
-#define MSR_SYSCALL_MASK	0xc0000084 /* EFLAGS mask for syscall */
-#define MSR_FS_BASE		0xc0000100 /* 64bit FS base */
-#define MSR_GS_BASE		0xc0000101 /* 64bit GS base */
-#define MSR_KERNEL_GS_BASE	0xc0000102 /* SwapGS GS shadow */
-#define MSR_TSC_AUX		0xc0000103 /* Auxiliary TSC */
+#define MSR_EFER 0xc0000080			  /* extended feature register */
+#define MSR_STAR 0xc0000081			  /* legacy mode SYSCALL target */
+#define MSR_LSTAR 0xc0000082		  /* long mode SYSCALL target */
+#define MSR_CSTAR 0xc0000083		  /* compat mode SYSCALL target */
+#define MSR_SYSCALL_MASK 0xc0000084   /* EFLAGS mask for syscall */
+#define MSR_FS_BASE 0xc0000100		  /* 64bit FS base */
+#define MSR_GS_BASE 0xc0000101		  /* 64bit GS base */
+#define MSR_KERNEL_GS_BASE 0xc0000102 /* SwapGS GS shadow */
+#define MSR_TSC_AUX 0xc0000103		  /* Auxiliary TSC */
 
-#define MSR_IA32_CR_PAT         0x00000277
-#define MSR_PEBS_FRONTEND       0x000003f7
+#define MSR_IA32_CR_PAT 0x00000277
+#define MSR_PEBS_FRONTEND 0x000003f7
 
-#define MSR_IA32_POWER_CTL      0x000001fc
+#define MSR_IA32_POWER_CTL 0x000001fc
 
-#define MSR_IA32_MC0_CTL        0x00000400
-#define MSR_IA32_MC0_STATUS     0x00000401
-#define MSR_IA32_MC0_ADDR       0x00000402
-#define MSR_IA32_MC0_MISC       0x00000403
+#define MSR_IA32_MC0_CTL 0x00000400
+#define MSR_IA32_MC0_STATUS 0x00000401
+#define MSR_IA32_MC0_ADDR 0x00000402
+#define MSR_IA32_MC0_MISC 0x00000403
 
-#define MSR_IA32_SYSENTER_CS    0x00000174
-#define MSR_IA32_SYSENTER_ESP   0x00000175
-#define MSR_IA32_SYSENTER_EIP   0x00000176
+#define MSR_IA32_SYSENTER_CS 0x00000174
+#define MSR_IA32_SYSENTER_ESP 0x00000175
+#define MSR_IA32_SYSENTER_EIP 0x00000176
 
-#define MSR_IA32_APICBASE       0x0000001b
-#define MSR_IA32_APICBASE_BSP   (1<<8)
-#define MSR_IA32_APICBASE_ENABLE (1<<11)
-#define MSR_IA32_APICBASE_BASE  (0xfffff<<12)
+#define MSR_IA32_APICBASE 0x0000001b
+#define MSR_IA32_APICBASE_BSP (1 << 8)
+#define MSR_IA32_APICBASE_ENABLE (1 << 11)
+#define MSR_IA32_APICBASE_BASE (0xfffff << 12)
 
-#define MSR_IA32_MISC_ENABLE    0x000001a0
-#define MSR_IA32_TSC            0x00000010
+#define MSR_IA32_MISC_ENABLE 0x000001a0
+#define MSR_IA32_TSC 0x00000010
 
 /* EFER bits: */
-#define _EFER_SCE               0  /* SYSCALL/SYSRET */
-#define _EFER_LME               8  /* Long mode enable */
-#define _EFER_LMA               10 /* Long mode active (read-only) */
-#define _EFER_NX                11 /* No execute enable */
-#define _EFER_SVME              12 /* Enable virtualization */
-#define _EFER_LMSLE             13 /* Long Mode Segment Limit Enable */
-#define _EFER_FFXSR             14 /* Enable Fast FXSAVE/FXRSTOR */
+#define _EFER_SCE 0	/* SYSCALL/SYSRET */
+#define _EFER_LME 8	/* Long mode enable */
+#define _EFER_LMA 10   /* Long mode active (read-only) */
+#define _EFER_NX 11	/* No execute enable */
+#define _EFER_SVME 12  /* Enable virtualization */
+#define _EFER_LMSLE 13 /* Long Mode Segment Limit Enable */
+#define _EFER_FFXSR 14 /* Enable Fast FXSAVE/FXRSTOR */
 
-#define EFER_SCE                (1<<_EFER_SCE)
-#define EFER_LME                (1<<_EFER_LME)
-#define EFER_LMA                (1<<_EFER_LMA)
-#define EFER_NX                 (1<<_EFER_NX)
-#define EFER_SVME               (1<<_EFER_SVME)
-#define EFER_LMSLE              (1<<_EFER_LMSLE)
-#define EFER_FFXSR              (1<<_EFER_FFXSR)
+#define EFER_SCE (1 << _EFER_SCE)
+#define EFER_LME (1 << _EFER_LME)
+#define EFER_LMA (1 << _EFER_LMA)
+#define EFER_NX (1 << _EFER_NX)
+#define EFER_SVME (1 << _EFER_SVME)
+#define EFER_LMSLE (1 << _EFER_LMSLE)
+#define EFER_FFXSR (1 << _EFER_FFXSR)
 #endif
 #include <asm/mman.h>
 
-#include "uhyve.h"
+#include "proxy.h"
 #include "uhyve-gdb.h"
-#include "uhyve-x86_64.h"
-#include "uhyve-syscalls.h"
 #include "uhyve-migration.h"
 #include "uhyve-net.h"
-#include "proxy.h"
+#include "uhyve-syscalls.h"
+#include "uhyve-x86_64.h"
+#include "uhyve.h"
 
 // define this macro to create checkpoints with KVM's dirty log
 //#define USE_DIRTY_LOG
 
-#define MAX_FNAME       256
+#define MAX_FNAME 256
 
-#define GUEST_OFFSET		0x0
-#define CPUID_FUNC_PERFMON	0x0A
-#define GUEST_PAGE_SIZE		0x200000   /* 2 MB pages in guest */
+#define GUEST_OFFSET 0x0
+#define CPUID_FUNC_PERFMON 0x0A
+#define GUEST_PAGE_SIZE 0x200000 /* 2 MB pages in guest */
 
-#define BOOT_GDT	0x1000
-#define BOOT_INFO	0x2000
-#define BOOT_PML4	0x10000
-#define BOOT_PDPTE	0x11000
-#define BOOT_PDE	0x12000
+#define BOOT_GDT 0x1000
+#define BOOT_INFO 0x2000
+#define BOOT_PML4 0x10000
+#define BOOT_PDPTE 0x11000
+#define BOOT_PDE 0x12000
 
-#define BOOT_GDT_NULL	0
-#define BOOT_GDT_CODE	1
-#define BOOT_GDT_DATA	2
-#define BOOT_GDT_MAX	3
+#define BOOT_GDT_NULL 0
+#define BOOT_GDT_CODE 1
+#define BOOT_GDT_DATA 2
+#define BOOT_GDT_MAX 3
 
-#define KVM_32BIT_MAX_MEM_SIZE	(1ULL << 32)
-#define KVM_32BIT_GAP_SIZE	(768 << 20)
-#define KVM_32BIT_GAP_START	(KVM_32BIT_MAX_MEM_SIZE - KVM_32BIT_GAP_SIZE)
-#define KVM_32BIT_GAP_END	(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE)
+#define KVM_32BIT_MAX_MEM_SIZE (1ULL << 32)
+#define KVM_32BIT_GAP_SIZE (768 << 20)
+#define KVM_32BIT_GAP_START (KVM_32BIT_MAX_MEM_SIZE - KVM_32BIT_GAP_SIZE)
+#define KVM_32BIT_GAP_END (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE)
 
 /// Page offset bits
-#define PAGE_BITS			12
-#define PAGE_2M_BITS	21
-#define PAGE_SIZE			(1L << PAGE_BITS)
+#define PAGE_BITS 12
+#define PAGE_2M_BITS 21
+#define PAGE_SIZE (1L << PAGE_BITS)
 /// Mask the page address without page map flags and XD flag
 #if 0
-#define PAGE_MASK		((~0L) << PAGE_BITS)
+#define PAGE_MASK ((~0L) << PAGE_BITS)
 #define PAGE_2M_MASK		(~0L) << PAGE_2M_BITS)
 #else
-#define PAGE_MASK			(((~0UL) << PAGE_BITS) & ~PG_XD)
-#define PAGE_2M_MASK	(((~0UL) << PAGE_2M_BITS) & ~PG_XD)
+#define PAGE_MASK (((~0UL) << PAGE_BITS) & ~PG_XD)
+#define PAGE_2M_MASK (((~0UL) << PAGE_2M_BITS) & ~PG_XD)
 #endif
 
 // Page is present
-#define PG_PRESENT		(1 << 0)
+#define PG_PRESENT (1 << 0)
 // Page is read- and writable
-#define PG_RW			(1 << 1)
+#define PG_RW (1 << 1)
 // Page is addressable from userspace
-#define PG_USER			(1 << 2)
+#define PG_USER (1 << 2)
 // Page write through is activated
-#define PG_PWT			(1 << 3)
+#define PG_PWT (1 << 3)
 // Page cache is disabled
-#define PG_PCD			(1 << 4)
+#define PG_PCD (1 << 4)
 // Page was recently accessed (set by CPU)
-#define PG_ACCESSED		(1 << 5)
+#define PG_ACCESSED (1 << 5)
 // Page is dirty due to recent write-access (set by CPU)
-#define PG_DIRTY		(1 << 6)
+#define PG_DIRTY (1 << 6)
 // Huge page: 4MB (or 2MB, 1GB)
-#define PG_PSE			(1 << 7)
+#define PG_PSE (1 << 7)
 // Page attribute table
-#define PG_PAT			PG_PSE
+#define PG_PAT PG_PSE
 #if 1
 /* @brief Global TLB entry (Pentium Pro and later)
  *
  * HermitCore is a single-address space operating system
  * => CR3 never changed => The flag isn't required for HermitCore
  */
-#define PG_GLOBAL		0
+#define PG_GLOBAL 0
 #else
-#define PG_GLOBAL		(1 << 8)
+#define PG_GLOBAL (1 << 8)
 #endif
 // This table is a self-reference and should skipped by page_map_copy()
-#define PG_SELF			(1 << 9)
+#define PG_SELF (1 << 9)
 
 /// Disable execution for this page
-#define PG_XD			(1L << 63)
+#define PG_XD (1L << 63)
 
-#define BITS					64
-#define PHYS_BITS			52
-#define VIRT_BITS			48
-#define PAGE_MAP_BITS	9
-#define PAGE_MAP_MASK	0x1FF
-#define PAGE_LEVELS		4
+#define BITS 64
+#define PHYS_BITS 52
+#define VIRT_BITS 48
+#define PAGE_MAP_BITS 9
+#define PAGE_MAP_MASK 0x1FF
+#define PAGE_LEVELS 4
 
-#define IOAPIC_DEFAULT_BASE	0xfec00000
-#define APIC_DEFAULT_BASE	0xfee00000
+#define IOAPIC_DEFAULT_BASE 0xfec00000
+#define APIC_DEFAULT_BASE 0xfee00000
 
-
-static bool cap_tsc_deadline = false;
-static bool cap_irqchip = false;
+static bool cap_tsc_deadline		= false;
+static bool cap_irqchip				= false;
 static bool cap_adjust_clock_stable = false;
-static bool cap_irqfd = false;
-static bool cap_vapic = false;
+static bool cap_irqfd				= false;
+static bool cap_vapic				= false;
 
 FILE *chk_file = NULL;
 
-extern size_t guest_size;
-extern pthread_barrier_t barrier;
-extern pthread_barrier_t migration_barrier;
-extern pthread_t* vcpu_threads;
-extern uint64_t elf_entry;
-extern uint8_t* klog;
-extern bool verbose;
-extern bool full_checkpoint;
-extern uint32_t no_checkpoint;
-extern uint32_t ncores;
-extern uint8_t* guest_mem;
-extern size_t guest_size;
-extern int kvm, vmfd, netfd, efd, mig_efd;
-extern uint8_t* mboot;
+extern size_t					guest_size;
+extern pthread_barrier_t		barrier;
+extern pthread_barrier_t		migration_barrier;
+extern pthread_t *				vcpu_threads;
+extern uint64_t					elf_entry;
+extern uint8_t *				klog;
+extern bool						verbose;
+extern bool						full_checkpoint;
+extern uint32_t					no_checkpoint;
+extern uint32_t					ncores;
+extern uint8_t *				guest_mem;
+extern size_t					guest_size;
+extern int						kvm, vmfd, netfd, efd, mig_efd;
+extern uint8_t *				mboot;
 extern __thread struct kvm_run *run;
-extern __thread int vcpufd;
-extern __thread uint32_t cpuid;
+extern __thread int				vcpufd;
+extern __thread uint32_t		cpuid;
 
-extern vcpu_state_t *vcpu_thread_states;
+extern vcpu_state_t * vcpu_thread_states;
 extern mem_mappings_t mem_mappings;
 extern mem_mappings_t guest_physical_memory;
 
-static inline void show_dtable(const char *name, struct kvm_dtable *dtable)
-{
-	fprintf(stderr, " %s                 %016zx  %08hx\n", name, (size_t) dtable->base, (uint16_t) dtable->limit);
+static inline void show_dtable(const char *name, struct kvm_dtable *dtable) {
+	fprintf(stderr,
+			" %s                 %016zx  %08hx\n",
+			name,
+			(size_t)dtable->base,
+			(uint16_t)dtable->limit);
 }
 
-static inline void show_segment(const char *name, struct kvm_segment *seg)
-{
-	fprintf(stderr, " %s       %04hx      %016zx  %08x  %02hhx    %x %x   %x  %x %x %x %x\n",
-		name, (uint16_t) seg->selector, (size_t) seg->base, (uint32_t) seg->limit,
-		(uint8_t) seg->type, seg->present, seg->dpl, seg->db, seg->s, seg->l, seg->g, seg->avl);
+static inline void show_segment(const char *name, struct kvm_segment *seg) {
+	fprintf(
+		stderr,
+		" %s       %04hx      %016zx  %08x  %02hhx    %x %x   %x  %x %x %x %x\n",
+		name,
+		(uint16_t)seg->selector,
+		(size_t)seg->base,
+		(uint32_t)seg->limit,
+		(uint8_t)seg->type,
+		seg->present,
+		seg->dpl,
+		seg->db,
+		seg->s,
+		seg->l,
+		seg->g,
+		seg->avl);
 }
 
-static void show_registers(int id, struct kvm_regs* regs, struct kvm_sregs* sregs)
-{
+static void
+show_registers(int id, struct kvm_regs *regs, struct kvm_sregs *sregs) {
 	size_t cr0, cr2, cr3;
 	size_t cr4, cr8;
 	size_t rax, rbx, rcx;
 	size_t rdx, rsi, rdi;
-	size_t rbp,  r8,  r9;
+	size_t rbp, r8, r9;
 	size_t r10, r11, r12;
 	size_t r13, r14, r15;
 	size_t rip, rsp;
 	size_t rflags;
-	int i;
+	int	i;
 
 	rflags = regs->rflags;
-	rip = regs->rip; rsp = regs->rsp;
-	rax = regs->rax; rbx = regs->rbx; rcx = regs->rcx;
-	rdx = regs->rdx; rsi = regs->rsi; rdi = regs->rdi;
-	rbp = regs->rbp; r8  = regs->r8;  r9  = regs->r9;
-	r10 = regs->r10; r11 = regs->r11; r12 = regs->r12;
-	r13 = regs->r13; r14 = regs->r14; r15 = regs->r15;
+	rip	= regs->rip;
+	rsp	= regs->rsp;
+	rax	= regs->rax;
+	rbx	= regs->rbx;
+	rcx	= regs->rcx;
+	rdx	= regs->rdx;
+	rsi	= regs->rsi;
+	rdi	= regs->rdi;
+	rbp	= regs->rbp;
+	r8	 = regs->r8;
+	r9	 = regs->r9;
+	r10	= regs->r10;
+	r11	= regs->r11;
+	r12	= regs->r12;
+	r13	= regs->r13;
+	r14	= regs->r14;
+	r15	= regs->r15;
 
 	fprintf(stderr, "\n Dump state of CPU %d\n", id);
 	fprintf(stderr, "\n Registers:\n");
 	fprintf(stderr, " ----------\n");
-	fprintf(stderr, " rip: %016zx   rsp: %016zx flags: %016zx\n", rip, rsp, rflags);
-	fprintf(stderr, " rax: %016zx   rbx: %016zx   rcx: %016zx\n", rax, rbx, rcx);
-	fprintf(stderr, " rdx: %016zx   rsi: %016zx   rdi: %016zx\n", rdx, rsi, rdi);
-	fprintf(stderr, " rbp: %016zx    r8: %016zx    r9: %016zx\n", rbp, r8,  r9);
-	fprintf(stderr, " r10: %016zx   r11: %016zx   r12: %016zx\n", r10, r11, r12);
-	fprintf(stderr, " r13: %016zx   r14: %016zx   r15: %016zx\n", r13, r14, r15);
+	fprintf(
+		stderr, " rip: %016zx   rsp: %016zx flags: %016zx\n", rip, rsp, rflags);
+	fprintf(
+		stderr, " rax: %016zx   rbx: %016zx   rcx: %016zx\n", rax, rbx, rcx);
+	fprintf(
+		stderr, " rdx: %016zx   rsi: %016zx   rdi: %016zx\n", rdx, rsi, rdi);
+	fprintf(stderr, " rbp: %016zx    r8: %016zx    r9: %016zx\n", rbp, r8, r9);
+	fprintf(
+		stderr, " r10: %016zx   r11: %016zx   r12: %016zx\n", r10, r11, r12);
+	fprintf(
+		stderr, " r13: %016zx   r14: %016zx   r15: %016zx\n", r13, r14, r15);
 
-	cr0 = sregs->cr0; cr2 = sregs->cr2; cr3 = sregs->cr3;
-	cr4 = sregs->cr4; cr8 = sregs->cr8;
+	cr0 = sregs->cr0;
+	cr2 = sregs->cr2;
+	cr3 = sregs->cr3;
+	cr4 = sregs->cr4;
+	cr8 = sregs->cr8;
 
-	fprintf(stderr, " cr0: %016zx   cr2: %016zx   cr3: %016zx\n", cr0, cr2, cr3);
+	fprintf(
+		stderr, " cr0: %016zx   cr2: %016zx   cr3: %016zx\n", cr0, cr2, cr3);
 	fprintf(stderr, " cr4: %016zx   cr8: %016zx\n", cr4, cr8);
 	fprintf(stderr, "\n Segment registers:\n");
-	fprintf(stderr,   " ------------------\n");
-	fprintf(stderr, " register  selector  base              limit     type  p dpl db s l g avl\n");
+	fprintf(stderr, " ------------------\n");
+	fprintf(
+		stderr,
+		" register  selector  base              limit     type  p dpl db s l g avl\n");
 	show_segment("cs ", &sregs->cs);
 	show_segment("ss ", &sregs->ss);
 	show_segment("ds ", &sregs->ds);
@@ -294,20 +327,21 @@ static void show_registers(int id, struct kvm_regs* regs, struct kvm_sregs* sreg
 	show_dtable("idt", &sregs->idt);
 
 	fprintf(stderr, "\n APIC:\n");
-	fprintf(stderr,   " -----\n");
-	fprintf(stderr, " efer: %016zx  apic base: %016zx\n",
-		(size_t) sregs->efer, (size_t) sregs->apic_base);
+	fprintf(stderr, " -----\n");
+	fprintf(stderr,
+			" efer: %016zx  apic base: %016zx\n",
+			(size_t)sregs->efer,
+			(size_t)sregs->apic_base);
 
 	fprintf(stderr, "\n Interrupt bitmap:\n");
-	fprintf(stderr,   " -----------------\n");
+	fprintf(stderr, " -----------------\n");
 	for (i = 0; i < (KVM_NR_INTERRUPTS + 63) / 64; i++)
-		fprintf(stderr, " %016zx", (size_t) sregs->interrupt_bitmap[i]);
+		fprintf(stderr, " %016zx", (size_t)sregs->interrupt_bitmap[i]);
 	fprintf(stderr, "\n");
 }
 
-void print_registers(void)
-{
-	struct kvm_regs regs;
+void print_registers(void) {
+	struct kvm_regs  regs;
 	struct kvm_sregs sregs;
 
 	kvm_ioctl(vcpufd, KVM_GET_SREGS, &sregs);
@@ -318,23 +352,23 @@ void print_registers(void)
 
 /// Filter CPUID functions that are not supported by the hypervisor and enable
 /// features according to our needs.
-static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid)
-{
+static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid) {
 	for (uint32_t i = 0; i < kvm_cpuid->nent; i++) {
 		struct kvm_cpuid_entry2 *entry = &kvm_cpuid->entries[i];
 
 		switch (entry->function) {
 		case 1:
 			// CPUID to define basic cpu features
-			entry->ecx |= (1U << 31); // propagate that we are running on a hypervisor
+			entry->ecx |=
+				(1U << 31); // propagate that we are running on a hypervisor
 			if (cap_tsc_deadline)
 				entry->ecx |= (1U << 24); // enable TSC deadline feature
-			entry->edx |= (1U <<  5); // enable msr support
+			entry->edx |= (1U << 5);	  // enable msr support
 			break;
 
 		case CPUID_FUNC_PERFMON:
 			// disable it
-			entry->eax	= 0x00;
+			entry->eax = 0x00;
 			break;
 
 		default:
@@ -344,19 +378,17 @@ static void filter_cpuid(struct kvm_cpuid2 *kvm_cpuid)
 	}
 }
 
-static void setup_system_64bit(struct kvm_sregs *sregs)
-{
+static void setup_system_64bit(struct kvm_sregs *sregs) {
 	sregs->cr0 |= X86_CR0_PE;
 	sregs->cr4 |= X86_CR4_PAE;
-	sregs->efer |= EFER_LME|EFER_LMA;
+	sregs->efer |= EFER_LME | EFER_LMA;
 }
 
-static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
-{
-	uint64_t *pml4 = (uint64_t *) (mem + BOOT_PML4);
-	uint64_t *pdpte = (uint64_t *) (mem + BOOT_PDPTE);
-	uint64_t *pde = (uint64_t *) (mem + BOOT_PDE);
-	uint64_t paddr;
+static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem) {
+	uint64_t *pml4  = (uint64_t *)(mem + BOOT_PML4);
+	uint64_t *pdpte = (uint64_t *)(mem + BOOT_PDPTE);
+	uint64_t *pde   = (uint64_t *)(mem + BOOT_PDE);
+	uint64_t  paddr;
 
 	/*
 	 * For simplicity we currently use 2MB pages and only a single
@@ -367,7 +399,7 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
 	memset(pdpte, 0x00, 4096);
 	memset(pde, 0x00, 4096);
 
-	*pml4 = BOOT_PDPTE | (X86_PDPT_P | X86_PDPT_RW);
+	*pml4  = BOOT_PDPTE | (X86_PDPT_P | X86_PDPT_RW);
 	*pdpte = BOOT_PDE | (X86_PDPT_P | X86_PDPT_RW);
 	for (paddr = 0; paddr < 0x20000000ULL; paddr += GUEST_PAGE_SIZE, pde++)
 		*pde = paddr | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
@@ -377,11 +409,9 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
 	sregs->cr0 |= X86_CR0_PG;
 }
 
-static void setup_system_gdt(struct kvm_sregs *sregs,
-                             uint8_t *mem,
-                             uint64_t off)
-{
-	uint64_t *gdt = (uint64_t *) (mem + off);
+static void
+setup_system_gdt(struct kvm_sregs *sregs, uint8_t *mem, uint64_t off) {
+	uint64_t *		   gdt = (uint64_t *)(mem + off);
 	struct kvm_segment data_seg, code_seg;
 
 	/* flags, base, limit */
@@ -389,7 +419,7 @@ static void setup_system_gdt(struct kvm_sregs *sregs,
 	gdt[BOOT_GDT_CODE] = GDT_ENTRY(0xA09B, 0, 0xFFFFF);
 	gdt[BOOT_GDT_DATA] = GDT_ENTRY(0xC093, 0, 0xFFFFF);
 
-	sregs->gdt.base = off;
+	sregs->gdt.base  = off;
 	sregs->gdt.limit = (sizeof(uint64_t) * BOOT_GDT_MAX) - 1;
 
 	GDT_TO_KVM_SEGMENT(code_seg, gdt, BOOT_GDT_CODE);
@@ -403,8 +433,7 @@ static void setup_system_gdt(struct kvm_sregs *sregs,
 	sregs->ss = data_seg;
 }
 
-static void setup_system(int vcpufd, uint8_t *mem, uint32_t id)
-{
+static void setup_system(int vcpufd, uint8_t *mem, uint32_t id) {
 	static struct kvm_sregs sregs;
 
 	// all cores use the same startup code
@@ -422,13 +451,13 @@ static void setup_system(int vcpufd, uint8_t *mem, uint32_t id)
 	kvm_ioctl(vcpufd, KVM_SET_SREGS, &sregs);
 }
 
-static void setup_cpuid(int kvm, int vcpufd)
-{
+static void setup_cpuid(int kvm, int vcpufd) {
 	struct kvm_cpuid2 *kvm_cpuid;
-	unsigned int max_entries = 100;
+	unsigned int	   max_entries = 100;
 
 	// allocate space for cpuid we get from KVM
-	kvm_cpuid = calloc(1, sizeof(*kvm_cpuid) + (max_entries * sizeof(kvm_cpuid->entries[0])));
+	kvm_cpuid = calloc(
+		1, sizeof(*kvm_cpuid) + (max_entries * sizeof(kvm_cpuid->entries[0])));
 	kvm_cpuid->nent = max_entries;
 
 	kvm_ioctl(kvm, KVM_GET_SUPPORTED_CPUID, kvm_cpuid);
@@ -444,34 +473,36 @@ static void setup_cpuid(int kvm, int vcpufd)
  * \brief Fills mem_mappings with chunks of guest-physical memory
  */
 static inline void
-determine_guest_physical_memory_regions(mem_mappings_t *mem_mappings)
-{
+determine_guest_physical_memory_regions(mem_mappings_t *mem_mappings) {
 	if (guest_size < KVM_32BIT_GAP_START) {
 		mem_mappings->count = 1;
-		mem_mappings->mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_mappings->count);
-		mem_mappings->mem_chunks[0].ptr = 0;
+		mem_mappings->mem_chunks =
+			(mem_chunk_t *)malloc(sizeof(mem_chunk_t) * mem_mappings->count);
+		mem_mappings->mem_chunks[0].ptr  = 0;
 		mem_mappings->mem_chunks[0].size = guest_size;
 	} else {
 		mem_mappings->count = 2;
-		mem_mappings->mem_chunks = (mem_chunk_t*)malloc(sizeof(mem_chunk_t)*mem_mappings->count);
-		mem_mappings->mem_chunks[0].ptr = 0;
+		mem_mappings->mem_chunks =
+			(mem_chunk_t *)malloc(sizeof(mem_chunk_t) * mem_mappings->count);
+		mem_mappings->mem_chunks[0].ptr  = 0;
 		mem_mappings->mem_chunks[0].size = KVM_32BIT_GAP_START;
-		mem_mappings->mem_chunks[1].ptr = (uint8_t*)((uint64_t)(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
-		mem_mappings->mem_chunks[1].size = (uint64_t)guest_size - (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE);
+		mem_mappings->mem_chunks[1].ptr =
+			(uint8_t *)((uint64_t)(KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE));
+		mem_mappings->mem_chunks[1].size =
+			(uint64_t)guest_size - (KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE);
 	}
 
 	return;
 }
 
-
-static void convert_to_host_virt(mem_mappings_t *mem_mappings)
-{
+static void convert_to_host_virt(mem_mappings_t *mem_mappings) {
 	size_t i = 0;
 	/* convert guest-physical addrees to host-virtual */
 	fprintf(stderr, "[INFO] We have %u memory chunks\n", mem_mappings->count);
 	fprintf(stderr, "[INFO] ");
-	for (i=0; i<mem_mappings->count; ++i) {
-		fprintf(stderr, "(ADDR[%lu]: 0x%llx, SIZE[%lu]: 0x%llx); ",
+	for (i = 0; i < mem_mappings->count; ++i) {
+		fprintf(stderr,
+				"(ADDR[%lu]: 0x%llx, SIZE[%lu]: 0x%llx); ",
 				i,
 				mem_mappings->mem_chunks[i].ptr,
 				i,
@@ -479,17 +510,18 @@ static void convert_to_host_virt(mem_mappings_t *mem_mappings)
 	}
 	printf("\b\b\n");
 
-	for (i=0; i<mem_mappings->count; ++i) {
+	for (i = 0; i < mem_mappings->count; ++i) {
 		uint8_t *cur_ptr = mem_mappings->mem_chunks[i].ptr;
-		mem_mappings->mem_chunks[i].ptr = (uint8_t*)(guest_mem+(size_t)cur_ptr);
+		mem_mappings->mem_chunks[i].ptr =
+			(uint8_t *)(guest_mem + (size_t)cur_ptr);
 	}
 }
 
 /* checks wether the mem_mappings.mem_chunks[cur_slot] contains the IO gap */
-static inline void check_for_io_gap(size_t *cur_slot)
-{
+static inline void check_for_io_gap(size_t *cur_slot) {
 	size_t cur_start = (size_t)mem_mappings.mem_chunks[*cur_slot].ptr;
-	size_t cur_end = (size_t)mem_mappings.mem_chunks[*cur_slot].ptr + (size_t)mem_mappings.mem_chunks[*cur_slot].size;
+	size_t cur_end   = (size_t)mem_mappings.mem_chunks[*cur_slot].ptr +
+					 (size_t)mem_mappings.mem_chunks[*cur_slot].size;
 	if (cur_start == KVM_32BIT_GAP_START && cur_end == KVM_32BIT_GAP_END) {
 		/* remove the chunk */
 		*cur_slot -= 1;
@@ -502,12 +534,13 @@ static inline void check_for_io_gap(size_t *cur_slot)
 		mem_mappings.mem_chunks[*cur_slot].size -= KVM_32BIT_GAP_SIZE;
 		mem_mappings.mem_chunks[*cur_slot].ptr += KVM_32BIT_GAP_SIZE;
 	} else if ((cur_start < KVM_32BIT_GAP_START) &&
-		   (cur_end > KVM_32BIT_GAP_END)) {
+			   (cur_end > KVM_32BIT_GAP_END)) {
 		/* split element */
-		mem_mappings.mem_chunks[*cur_slot].size = KVM_32BIT_GAP_START - cur_start;
+		mem_mappings.mem_chunks[*cur_slot].size =
+			KVM_32BIT_GAP_START - cur_start;
 
 		*cur_slot += 1;
-		mem_mappings.mem_chunks[*cur_slot].ptr = (uint8_t*)KVM_32BIT_GAP_END;
+		mem_mappings.mem_chunks[*cur_slot].ptr  = (uint8_t *)KVM_32BIT_GAP_END;
 		mem_mappings.mem_chunks[*cur_slot].size = cur_end - KVM_32BIT_GAP_END;
 		mem_mappings.count++;
 	}
@@ -515,8 +548,7 @@ static inline void check_for_io_gap(size_t *cur_slot)
 	return;
 }
 
-size_t determine_dest_offset(size_t src_addr)
-{
+size_t determine_dest_offset(size_t src_addr) {
 	size_t ret = 0;
 	if (src_addr & PG_PSE) {
 		ret = src_addr & PAGE_2M_MASK;
@@ -526,51 +558,48 @@ size_t determine_dest_offset(size_t src_addr)
 	return ret;
 }
 
-void init_cpu_state(uint64_t elf_entry)
-{
+void init_cpu_state(uint64_t elf_entry) {
 	struct kvm_regs regs = {
-		.rip = elf_entry,	// entry point to HermitCore
-		.rflags = 0x2,		// POR value required by x86 architecture
+		.rip	= elf_entry, // entry point to HermitCore
+		.rflags = 0x2,		 // POR value required by x86 architecture
 	};
-	struct kvm_mp_state mp_state = { KVM_MP_STATE_RUNNABLE };
+	struct kvm_mp_state mp_state = {KVM_MP_STATE_RUNNABLE};
 	struct {
-		struct kvm_msrs info;
+		struct kvm_msrs		 info;
 		struct kvm_msr_entry entries[MAX_MSR_ENTRIES];
 	} msr_data;
 	struct kvm_msr_entry *msrs = msr_data.entries;
 
 	run->apic_base = APIC_DEFAULT_BASE;
-        setup_cpuid(kvm, vcpufd);
+	setup_cpuid(kvm, vcpufd);
 
 	// be sure that the multiprocessor is runable
 	kvm_ioctl(vcpufd, KVM_SET_MP_STATE, &mp_state);
 
 	// enable fast string operations
-	msrs[0].index = MSR_IA32_MISC_ENABLE;
-	msrs[0].data = 1;
+	msrs[0].index		= MSR_IA32_MISC_ENABLE;
+	msrs[0].data		= 1;
 	msr_data.info.nmsrs = 1;
 	kvm_ioctl(vcpufd, KVM_SET_MSRS, &msr_data);
 
 	// only one core is able to enter startup code
 	// => the wait for the predecessor core
-	while (*((volatile uint32_t*) (mboot + 0x20)) < cpuid)
-		pthread_yield();
-	*((volatile uint32_t*) (mboot + 0x30)) = cpuid;
+	while (*((volatile uint32_t *)(mboot + 0x20)) < cpuid) pthread_yield();
+	*((volatile uint32_t *)(mboot + 0x30)) = cpuid;
 
 	/* Setup registers and memory. */
 	setup_system(vcpufd, guest_mem, cpuid);
 	kvm_ioctl(vcpufd, KVM_SET_REGS, &regs);
 }
 
-vcpu_state_t read_cpu_state(void)
-{
+vcpu_state_t read_cpu_state(void) {
 	vcpu_state_t cpu_state;
-	char fname[MAX_FNAME];
-	snprintf(fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
+	char		 fname[MAX_FNAME];
+	snprintf(
+		fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
 
-	FILE* f = fopen(fname, "r");
-	if (f == NULL)
-		err(1, "fopen: unable to open file");
+	FILE *f = fopen(fname, "r");
+	if (f == NULL) err(1, "fopen: unable to open file");
 
 	if (fread(&cpu_state, sizeof(cpu_state), 1, f) != 1)
 		err(1, "fread failed\n");
@@ -580,13 +609,11 @@ vcpu_state_t read_cpu_state(void)
 	return cpu_state;
 }
 
-void restore_cpu_state(vcpu_state_t cpu_state)
-{
+void restore_cpu_state(vcpu_state_t cpu_state) {
 	cpu_state.mp_state.mp_state = KVM_MP_STATE_RUNNABLE;
 
 	run->apic_base = APIC_DEFAULT_BASE;
-        setup_cpuid(kvm, vcpufd);
-
+	setup_cpuid(kvm, vcpufd);
 
 	kvm_ioctl(vcpufd, KVM_SET_SREGS, &cpu_state.sregs);
 	kvm_ioctl(vcpufd, KVM_SET_REGS, &cpu_state.regs);
@@ -599,9 +626,8 @@ void restore_cpu_state(vcpu_state_t cpu_state)
 	kvm_ioctl(vcpufd, KVM_SET_VCPU_EVENTS, &cpu_state.events);
 }
 
-vcpu_state_t save_cpu_state(void)
-{
-	int n = 0;
+vcpu_state_t save_cpu_state(void) {
+	int			 n = 0;
 	vcpu_state_t cpu_state;
 
 	/* define the list of required MSRs */
@@ -619,7 +645,7 @@ vcpu_state_t save_cpu_state(void)
 	cpu_state.msr_data.entries[n++].index = MSR_GS_BASE;
 	cpu_state.msr_data.entries[n++].index = MSR_FS_BASE;
 	cpu_state.msr_data.entries[n++].index = MSR_KERNEL_GS_BASE;
-	//msrs[n++].index = MSR_IA32_FEATURE_CONTROL;
+	// msrs[n++].index = MSR_IA32_FEATURE_CONTROL;
 	cpu_state.msr_data.info.nmsrs = n;
 
 	kvm_ioctl(vcpufd, KVM_GET_SREGS, &cpu_state.sregs);
@@ -635,13 +661,13 @@ vcpu_state_t save_cpu_state(void)
 	return cpu_state;
 }
 
-void write_cpu_state(void)
-{
+void write_cpu_state(void) {
 	vcpu_state_t cpu_state = save_cpu_state();
-	char fname[MAX_FNAME];
-	snprintf(fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
+	char		 fname[MAX_FNAME];
+	snprintf(
+		fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
 
-	FILE* f = fopen(fname, "w");
+	FILE *f = fopen(fname, "w");
 	if (f == NULL) {
 		err(1, "fopen: unable to open file\n");
 	}
@@ -652,13 +678,9 @@ void write_cpu_state(void)
 	fclose(f);
 }
 
-void scan_dirty_log(void (*save_page)(void*, size_t, void*, size_t))
-{
-	size_t slot_offset = 0;
-	static struct kvm_dirty_log dlog = {
-		.slot = 0,
-		.dirty_bitmap = NULL
-	};
+void scan_dirty_log(void (*save_page)(void *, size_t, void *, size_t)) {
+	size_t						slot_offset = 0;
+	static struct kvm_dirty_log dlog		= {.slot = 0, .dirty_bitmap = NULL};
 	size_t dirty_log_size = (guest_size >> PAGE_BITS) / sizeof(size_t);
 
 	// do we create our first checkpoint
@@ -667,8 +689,7 @@ void scan_dirty_log(void (*save_page)(void*, size_t, void*, size_t))
 		memset(&dlog, 0x00, sizeof(dlog));
 
 		dlog.dirty_bitmap = malloc(dirty_log_size * sizeof(size_t));
-		if (dlog.dirty_bitmap == NULL)
-			err(1, "malloc failed!\n");
+		if (dlog.dirty_bitmap == NULL) err(1, "malloc failed!\n");
 	}
 	memset(dlog.dirty_bitmap, 0x00, dirty_log_size * sizeof(size_t));
 
@@ -676,17 +697,21 @@ void scan_dirty_log(void (*save_page)(void*, size_t, void*, size_t))
 nextslot:
 	kvm_ioctl(vmfd, KVM_GET_DIRTY_LOG, &dlog);
 
-	for(size_t i=0; i<dirty_log_size; i++) {
-		size_t value = ((size_t*) dlog.dirty_bitmap)[i];
+	for (size_t i = 0; i < dirty_log_size; i++) {
+		size_t value = ((size_t *)dlog.dirty_bitmap)[i];
 
 		if (value) {
-			for(size_t j=0; j<sizeof(size_t)*8; j++) {
+			for (size_t j = 0; j < sizeof(size_t) * 8; j++) {
 				size_t test = 1ULL << j;
 
 				if ((value & test) == test) {
-					size_t addr = (i*sizeof(size_t)*8+j)*PAGE_SIZE + slot_offset;
+					size_t addr =
+						(i * sizeof(size_t) * 8 + j) * PAGE_SIZE + slot_offset;
 
-					save_page(&addr, sizeof(size_t), (void*)((uint64_t)guest_mem+(uint64_t)addr), PAGE_SIZE);
+					save_page(&addr,
+							  sizeof(size_t),
+							  (void *)((uint64_t)guest_mem + (uint64_t)addr),
+							  PAGE_SIZE);
 				}
 			}
 		}
@@ -695,73 +720,79 @@ nextslot:
 	// do we have to check the second slot?
 	if ((dlog.slot == 0) && (guest_size > KVM_32BIT_GAP_START - GUEST_OFFSET)) {
 		slot_offset = KVM_32BIT_MAX_MEM_SIZE;
-		dlog.slot = 1;
+		dlog.slot   = 1;
 		memset(dlog.dirty_bitmap, 0x00, dirty_log_size * sizeof(size_t));
 		goto nextslot;
 	}
 }
 
-void scan_page_tables(void (*save_page)(void*, size_t, void*, size_t))
-{
-	const size_t flag = (!full_checkpoint && (no_checkpoint > 0)) ? PG_DIRTY : PG_ACCESSED;
+void scan_page_tables(void (*save_page)(void *, size_t, void *, size_t)) {
+	const size_t flag =
+		(!full_checkpoint && (no_checkpoint > 0)) ? PG_DIRTY : PG_ACCESSED;
 
-	size_t* pml4 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
-	for(size_t i=0; i<(1 << PAGE_MAP_BITS); i++) {
-		if ((pml4[i] & PG_PRESENT) != PG_PRESENT)
-			continue;
-		//printf("pml[%zd] 0x%zx\n", i, pml4[i]);
-		size_t* pdpt = (size_t*) (guest_mem+(pml4[i] & PAGE_MASK));
-		for(size_t j=0; j<(1 << PAGE_MAP_BITS); j++) {
-			if ((pdpt[j] & PG_PRESENT) != PG_PRESENT)
-				continue;
-			//printf("\tpdpt[%zd] 0x%zx\n", j, pdpt[j]);
-			size_t* pgd = (size_t*) (guest_mem+(pdpt[j] & PAGE_MASK));
-			for(size_t k=0; k<(1 << PAGE_MAP_BITS); k++) {
-				if ((pgd[k] & PG_PRESENT) != PG_PRESENT)
-					continue;
-				//printf("\t\tpgd[%zd] 0x%zx\n", k, pgd[k] & ~PG_XD);
+	size_t *pml4 = (size_t *)(guest_mem + elf_entry + PAGE_SIZE);
+	for (size_t i = 0; i < (1 << PAGE_MAP_BITS); i++) {
+		if ((pml4[i] & PG_PRESENT) != PG_PRESENT) continue;
+		// printf("pml[%zd] 0x%zx\n", i, pml4[i]);
+		size_t *pdpt = (size_t *)(guest_mem + (pml4[i] & PAGE_MASK));
+		for (size_t j = 0; j < (1 << PAGE_MAP_BITS); j++) {
+			if ((pdpt[j] & PG_PRESENT) != PG_PRESENT) continue;
+			// printf("\tpdpt[%zd] 0x%zx\n", j, pdpt[j]);
+			size_t *pgd = (size_t *)(guest_mem + (pdpt[j] & PAGE_MASK));
+			for (size_t k = 0; k < (1 << PAGE_MAP_BITS); k++) {
+				if ((pgd[k] & PG_PRESENT) != PG_PRESENT) continue;
+				// printf("\t\tpgd[%zd] 0x%zx\n", k, pgd[k] & ~PG_XD);
 				if ((pgd[k] & PG_PSE) != PG_PSE) {
-					size_t* pgt = (size_t*) (guest_mem+(pgd[k] & PAGE_MASK));
-					for(size_t l=0; l<(1 << PAGE_MAP_BITS); l++) {
-						if ((pgt[l] & (PG_PRESENT|flag)) == (PG_PRESENT|flag)) {
-							//printf("\t\t\t*pgt[%zd] 0x%zx, 4KB\n", l, pgt[l] & ~PG_XD);
+					size_t *pgt = (size_t *)(guest_mem + (pgd[k] & PAGE_MASK));
+					for (size_t l = 0; l < (1 << PAGE_MAP_BITS); l++) {
+						if ((pgt[l] & (PG_PRESENT | flag)) ==
+							(PG_PRESENT | flag)) {
+							// printf("\t\t\t*pgt[%zd] 0x%zx, 4KB\n", l, pgt[l]
+							// & ~PG_XD);
 							if (!full_checkpoint)
-								pgt[l] = pgt[l] & ~(PG_DIRTY|PG_ACCESSED);
-							size_t pgt_entry = pgt[l] & ~PG_PSE; // because PAT use the same bit as PSE
+								pgt[l] = pgt[l] & ~(PG_DIRTY | PG_ACCESSED);
+							size_t pgt_entry =
+								pgt[l] &
+								~PG_PSE; // because PAT use the same bit as PSE
 
-							save_page(&pgt_entry, sizeof(size_t), (void*) (guest_mem + (pgt[l] & PAGE_MASK)), (1UL << PAGE_BITS));
+							save_page(
+								&pgt_entry,
+								sizeof(size_t),
+								(void *)(guest_mem + (pgt[l] & PAGE_MASK)),
+								(1UL << PAGE_BITS));
 						}
 					}
 				} else if ((pgd[k] & flag) == flag) {
-					//printf("\t\t*pgd[%zd] 0x%zx, 2MB\n", k, pgd[k] & ~PG_XD);
+					// printf("\t\t*pgd[%zd] 0x%zx, 2MB\n", k, pgd[k] & ~PG_XD);
 					if (!full_checkpoint)
-						pgd[k] = pgd[k] & ~(PG_DIRTY|PG_ACCESSED);
+						pgd[k] = pgd[k] & ~(PG_DIRTY | PG_ACCESSED);
 
-						save_page(pgd+k, sizeof(size_t), (void*) (guest_mem + (pgd[k] & PAGE_2M_MASK)), (1UL << PAGE_2M_BITS));
+					save_page(pgd + k,
+							  sizeof(size_t),
+							  (void *)(guest_mem + (pgd[k] & PAGE_2M_MASK)),
+							  (1UL << PAGE_2M_BITS));
 				}
 			}
 		}
 	}
 }
-void open_chk_file(char *fname)
-{
+void open_chk_file(char *fname) {
 	chk_file = fopen(fname, "w");
 	if (chk_file == NULL) {
 		err(1, "fopen: unable to open file");
 	}
 }
 
-
 /* determine guests memory mappings based on its free list
  *
  * The memory mappings are stored in terms of guest-physical pointers
  */
-void determine_mem_mappings(free_list_t *free_list)
-{
+void determine_mem_mappings(free_list_t *free_list) {
 	/* determine list length */
-	size_t free_list_length = 0;
-	free_list_t *cur = free_list;
-	for (free_list_length=0; (size_t)cur != (size_t)guest_mem; ++free_list_length) {
+	size_t		 free_list_length = 0;
+	free_list_t *cur			  = free_list;
+	for (free_list_length = 0; (size_t)cur != (size_t)guest_mem;
+		 ++free_list_length) {
 		cur = virt_to_phys_with_offset(cur->next);
 	}
 
@@ -769,83 +800,77 @@ void determine_mem_mappings(free_list_t *free_list)
 	 * +1: alloc is possible one element longer
 	 * +1: the IO_GAP might result in an additional element
 	 */
-	size_t mem_mappings_cnt_max = free_list_length+2;
-	mem_mappings.mem_chunks = (mem_chunk_t*)malloc(mem_mappings_cnt_max*sizeof(mem_chunk_t));
-	mem_mappings.count = mem_mappings_cnt_max-2;
-
+	size_t mem_mappings_cnt_max = free_list_length + 2;
+	mem_mappings.mem_chunks =
+		(mem_chunk_t *)malloc(mem_mappings_cnt_max * sizeof(mem_chunk_t));
+	mem_mappings.count = mem_mappings_cnt_max - 2;
 
 	/* allocation prior to first free region */
-	size_t cur_slot = 0;
-	mem_mappings.mem_chunks[0].ptr = (uint8_t*)0x800000;
-	mem_mappings.mem_chunks[0].size = (uint8_t*)free_list->start - mem_mappings.mem_chunks[0].ptr;
+	size_t cur_slot				   = 0;
+	mem_mappings.mem_chunks[0].ptr = (uint8_t *)0x800000;
+	mem_mappings.mem_chunks[0].size =
+		(uint8_t *)free_list->start - mem_mappings.mem_chunks[0].ptr;
 	check_for_io_gap(&cur_slot);
 
 	/* iterate the free list */
-	cur = free_list;
+	cur				  = free_list;
 	free_list_t *next = virt_to_phys_with_offset(cur->next);
-	for (++cur_slot; (uint8_t*)next != guest_mem; ++cur_slot) {
-		mem_mappings.mem_chunks[cur_slot].ptr = (uint8_t*)cur->end;
+	for (++cur_slot; (uint8_t *)next != guest_mem; ++cur_slot) {
+		mem_mappings.mem_chunks[cur_slot].ptr  = (uint8_t *)cur->end;
 		mem_mappings.mem_chunks[cur_slot].size = next->start - cur->end;
 
 		/* did we inlcude the IO gap? */
 		check_for_io_gap(&cur_slot);
-		cur = virt_to_phys_with_offset(cur->next);
+		cur  = virt_to_phys_with_offset(cur->next);
 		next = virt_to_phys_with_offset(cur->next);
 	}
 
 	/* allocation behind last free region */
 	if (guest_size != cur->end) {
-		mem_mappings.mem_chunks[cur_slot].ptr = (uint8_t*)cur->end;
+		mem_mappings.mem_chunks[cur_slot].ptr  = (uint8_t *)cur->end;
 		mem_mappings.mem_chunks[cur_slot].size = guest_size - cur->end;
 		check_for_io_gap(&cur_slot);
 	}
 
 	return;
-
 }
 
-void close_chk_file(void)
-{
-	fclose(chk_file);
-}
+void close_chk_file(void) { fclose(chk_file); }
 
-void write_chk_file(void *addr, size_t bytes)
-{
+void write_chk_file(void *addr, size_t bytes) {
 	if (fwrite(addr, bytes, 1, chk_file) != 1) {
 		err(1, "fwrite failed");
 	}
 }
 
-void write_mem_page_to_chk_file(void *entry, size_t entry_size, void *page, size_t page_size)
-{
+void write_mem_page_to_chk_file(void * entry,
+								size_t entry_size,
+								void * page,
+								size_t page_size) {
 	write_chk_file(entry, entry_size);
 	write_chk_file(page, page_size);
 }
 
-void determine_dirty_pages(void (*save_page_handler)(void*, size_t, void*, size_t))
-{
+void determine_dirty_pages(
+	void (*save_page_handler)(void *, size_t, void *, size_t)) {
 #ifdef USE_DIRTY_LOG
 	scan_dirty_log(save_page_handler);
 #else
 	scan_page_tables(save_page_handler);
 #endif
-
 }
 
-void timer_handler(int signum)
-{
+void timer_handler(int signum) {
 
-	struct stat st = {0};
-	char fname[MAX_FNAME];
+	struct stat	st = {0};
+	char		   fname[MAX_FNAME];
 	struct timeval begin, end;
 
-	if (verbose)
-		gettimeofday(&begin, NULL);
+	if (verbose) gettimeofday(&begin, NULL);
 
-	if (stat("checkpoint", &st) == -1)
-		mkdir("checkpoint", 0700);
+	if (stat("checkpoint", &st) == -1) mkdir("checkpoint", 0700);
 
-	for(size_t i = 0; i < ncores; i++)
+	for (size_t i = 0; i < ncores; i++)
 		if (vcpu_threads[i] != pthread_self())
 			pthread_kill(vcpu_threads[i], SIGTHRCHKP);
 
@@ -899,25 +924,26 @@ void timer_handler(int signum)
 		gettimeofday(&end, NULL);
 		size_t msec = (end.tv_sec - begin.tv_sec) * 1000;
 		msec += (end.tv_usec - begin.tv_usec) / 1000;
-		fprintf(stderr, "Create checkpoint %u in %zd ms\n", no_checkpoint, msec);
+		fprintf(
+			stderr, "Create checkpoint %u in %zd ms\n", no_checkpoint, msec);
 	}
 
 	no_checkpoint++;
 }
 
-void *migration_handler(void *arg)
-{
+void *migration_handler(void *arg) {
 	sigset_t *signal_mask = (sigset_t *)arg;
-	int res = 0;
-	size_t i = 0;
-	int sig_caught;
+	int		  res		  = 0;
+	size_t	i			  = 0;
+	int		  sig_caught;
 
 	/* wait for a migration request and connect to the migration server*/
 	while (1) {
 		sigwait(signal_mask, &sig_caught);
 
 		if (connect_to_server() < 0) {
-			fprintf(stderr, "[ERROR] Could not connect to the "
+			fprintf(stderr,
+					"[ERROR] Could not connect to the "
 					"destination. Abort!\n");
 		} else {
 			break;
@@ -925,20 +951,19 @@ void *migration_handler(void *arg)
 	}
 
 	/* send metadata */
-	migration_metadata_t metadata = {
-		ncores,
-		guest_size,
-	       	0, /* no_checkpoint */
-		elf_entry,
-		full_checkpoint};
+	migration_metadata_t metadata = {ncores,
+									 guest_size,
+									 0, /* no_checkpoint */
+									 elf_entry,
+									 full_checkpoint};
 
 	/* the guest size is recalculated at the destination */
-	if ((guest_size-KVM_32BIT_GAP_SIZE) >= KVM_32BIT_GAP_START) {
+	if ((guest_size - KVM_32BIT_GAP_SIZE) >= KVM_32BIT_GAP_START) {
 		metadata.guest_size -= KVM_32BIT_GAP_SIZE;
 	}
 
 	res = send_data(&metadata, sizeof(migration_metadata_t));
-      	fprintf(stderr, "Metadata sent! (%d bytes)\n", res);
+	fprintf(stderr, "Metadata sent! (%d bytes)\n", res);
 
 	/* determine guest-physical and guest-allocated memory regions */
 	determine_guest_allocations();
@@ -956,9 +981,8 @@ void *migration_handler(void *arg)
 
 	/* synchronize VCPU threads */
 	assert(vcpu_thread_states == NULL);
-	vcpu_thread_states = (vcpu_state_t*)calloc(ncores, sizeof(vcpu_state_t));
-	for(i = 0; i < ncores; i++)
-		pthread_kill(vcpu_threads[i], SIGTHRMIG);
+	vcpu_thread_states = (vcpu_state_t *)calloc(ncores, sizeof(vcpu_state_t));
+	for (i = 0; i < ncores; i++) pthread_kill(vcpu_threads[i], SIGTHRMIG);
 	pthread_barrier_wait(&migration_barrier);
 
 	/* send the final dump */
@@ -972,8 +996,8 @@ void *migration_handler(void *arg)
 	guest_physical_memory.count = 0;
 
 	/* send CPU state and cleanup */
-	res = send_data(vcpu_thread_states, sizeof(vcpu_state_t)*ncores);
-      	fprintf(stderr, "CPU state sent! (%d bytes)\n", res);
+	res = send_data(vcpu_thread_states, sizeof(vcpu_state_t) * ncores);
+	fprintf(stderr, "CPU state sent! (%d bytes)\n", res);
 	free(vcpu_thread_states);
 	vcpu_thread_states = NULL;
 
@@ -991,15 +1015,11 @@ void *migration_handler(void *arg)
 	exit(EXIT_SUCCESS);
 }
 
-int load_migration_data(uint8_t* mem)
-{
+int load_migration_data(uint8_t *mem) {
 	size_t paddr = elf_entry;
-	int res = 0;
-	if (!klog)
-		klog = mem+paddr+0x5000-GUEST_OFFSET;
-	if (!mboot)
-		mboot = mem+paddr-GUEST_OFFSET;
-
+	int	res   = 0;
+	if (!klog) klog = mem + paddr + 0x5000 - GUEST_OFFSET;
+	if (!mboot) mboot = mem + paddr - GUEST_OFFSET;
 
 	/* get memory chunk info from source and convert to host-virt */
 	recv_mem_regions(&mem_mappings);
@@ -1011,12 +1031,12 @@ int load_migration_data(uint8_t* mem)
 	/* cleanup memory mappings info */
 	free(mem_mappings.mem_chunks);
 	mem_mappings.mem_chunks = NULL;
-	mem_mappings.count = 0;
+	mem_mappings.count		= 0;
 
 	/* receive cpu state */
 	assert(vcpu_thread_states == NULL);
-	vcpu_thread_states = (vcpu_state_t*)calloc(ncores, sizeof(vcpu_state_t));
-	res = recv_data(vcpu_thread_states, sizeof(vcpu_state_t)*ncores);
+	vcpu_thread_states = (vcpu_state_t *)calloc(ncores, sizeof(vcpu_state_t));
+	res = recv_data(vcpu_thread_states, sizeof(vcpu_state_t) * ncores);
 	fprintf(stderr, "CPU states received! (%d bytes)\n", res);
 
 	/* receive clock */
@@ -1030,23 +1050,18 @@ int load_migration_data(uint8_t* mem)
 	}
 }
 
-int load_checkpoint(uint8_t* mem, char* path)
-{
-	char fname[MAX_FNAME];
-	size_t location;
-	size_t paddr = elf_entry;
-	int ret;
+int load_checkpoint(uint8_t *mem, char *path) {
+	char		   fname[MAX_FNAME];
+	size_t		   location;
+	size_t		   paddr = elf_entry;
+	int			   ret;
 	struct timeval begin, end;
-	uint32_t i;
+	uint32_t	   i;
 
-	if (verbose)
-		gettimeofday(&begin, NULL);
+	if (verbose) gettimeofday(&begin, NULL);
 
-	if (!klog)
-		klog = mem+paddr+0x5000-GUEST_OFFSET;
-	if (!mboot)
-		mboot = mem+paddr-GUEST_OFFSET;
-
+	if (!klog) klog = mem + paddr + 0x5000 - GUEST_OFFSET;
+	if (!mboot) mboot = mem + paddr - GUEST_OFFSET;
 
 #ifdef USE_DIRTY_LOG
 	/*
@@ -1056,18 +1071,15 @@ int load_checkpoint(uint8_t* mem, char* path)
 	 * technique.
 	 */
 	ret = load_kernel(mem, path);
-	if (ret)
-		return ret;
+	if (ret) return ret;
 #endif
 
 	i = full_checkpoint ? no_checkpoint : 0;
-	for(; i<=no_checkpoint; i++)
-	{
+	for (; i <= no_checkpoint; i++) {
 		snprintf(fname, MAX_FNAME, "checkpoint/chk%u_mem.dat", i);
 
-		FILE* f = fopen(fname, "r");
-		if (f == NULL)
-			return -1;
+		FILE *f = fopen(fname, "r");
+		if (f == NULL) return -1;
 
 		/*struct kvm_irqchip irqchip;
 		if (fread(&irqchip, sizeof(irqchip), 1, f) != 1)
@@ -1076,8 +1088,7 @@ int load_checkpoint(uint8_t* mem, char* path)
 			kvm_ioctl(vmfd, KVM_SET_IRQCHIP, &irqchip);*/
 
 		struct kvm_clock_data clock;
-		if (fread(&clock, sizeof(clock), 1, f) != 1)
-			err(1, "fread failed");
+		if (fread(&clock, sizeof(clock), 1, f) != 1) err(1, "fread failed");
 		// only the last checkpoint has to set the clock
 		if (cap_adjust_clock_stable && (i == no_checkpoint)) {
 			struct kvm_clock_data data = {};
@@ -1092,8 +1103,9 @@ int load_checkpoint(uint8_t* mem, char* path)
 #else
 
 		while (fread(&location, sizeof(location), 1, f) == 1) {
-			//printf("location 0x%zx\n", location);
-			size_t *dest_addr = (size_t*) (mem + determine_dest_offset(location));
+			// printf("location 0x%zx\n", location);
+			size_t *dest_addr =
+				(size_t *)(mem + determine_dest_offset(location));
 			if (location & PG_PSE)
 				ret = fread(dest_addr, (1UL << PAGE_2M_BITS), 1, f);
 			else
@@ -1119,8 +1131,8 @@ int load_checkpoint(uint8_t* mem, char* path)
 	return 0;
 }
 
-void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t listen_portno)
-{
+void wait_for_incomming_migration(migration_metadata_t *metadata,
+								  uint16_t				listen_portno) {
 	int res = 0, com_sock = 0;
 
 	wait_for_client(listen_portno);
@@ -1128,12 +1140,17 @@ void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t liste
 	/* receive metadata state */
 	res = recv_data(metadata, sizeof(migration_metadata_t));
 	fprintf(stderr, "Metadata received! (%d bytes)\n", res);
-	fprintf(stderr, "NCORES = %u; GUEST_SIZE = %zu; NO_CHKPOINT = %u; ELF_ENTRY = 0x%lx; FULL_CHKPT = %d\n",
-			metadata->ncores, metadata->guest_size, metadata->no_checkpoint, metadata->elf_entry, metadata->full_checkpoint);
+	fprintf(
+		stderr,
+		"NCORES = %u; GUEST_SIZE = %zu; NO_CHKPOINT = %u; ELF_ENTRY = 0x%lx; FULL_CHKPT = %d\n",
+		metadata->ncores,
+		metadata->guest_size,
+		metadata->no_checkpoint,
+		metadata->elf_entry,
+		metadata->full_checkpoint);
 }
 
-void init_kvm_arch(void)
-{
+void init_kvm_arch(void) {
 	uint64_t identity_base = 0xfffbc000;
 	if (ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_SYNC_MMU) > 0) {
 		/* Allows up to 16M BIOSes. */
@@ -1149,22 +1166,32 @@ void init_kvm_arch(void)
 	 * TODO: support of huge pages
 	 */
 	if (guest_size < KVM_32BIT_GAP_START) {
-		guest_mem = mmap(NULL, guest_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (guest_mem == MAP_FAILED)
-			err(1, "mmap failed");
+		guest_mem = mmap(NULL,
+						 guest_size,
+						 PROT_READ | PROT_WRITE,
+						 MAP_PRIVATE | MAP_ANONYMOUS,
+						 -1,
+						 0);
+		if (guest_mem == MAP_FAILED) err(1, "mmap failed");
 	} else {
 		guest_size += KVM_32BIT_GAP_SIZE;
-		guest_mem = mmap(NULL, guest_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (guest_mem == MAP_FAILED)
-			err(1, "mmap failed");
+		guest_mem = mmap(NULL,
+						 guest_size,
+						 PROT_READ | PROT_WRITE,
+						 MAP_PRIVATE | MAP_ANONYMOUS,
+						 -1,
+						 0);
+		if (guest_mem == MAP_FAILED) err(1, "mmap failed");
 
 		/*
-		 * We mprotect the gap PROT_NONE so that if we accidently write to it, we will know.
+		 * We mprotect the gap PROT_NONE so that if we accidently write to it,
+		 * we will know.
 		 */
-		mprotect(guest_mem + KVM_32BIT_GAP_START, KVM_32BIT_GAP_SIZE, PROT_NONE);
+		mprotect(
+			guest_mem + KVM_32BIT_GAP_START, KVM_32BIT_GAP_SIZE, PROT_NONE);
 	}
 
-	const char* merge = getenv("HERMIT_MERGEABLE");
+	const char *merge = getenv("HERMIT_MERGEABLE");
 	if (merge && (strcmp(merge, "0") != 0)) {
 		/*
 		 * The KSM feature is intended for applications that generate
@@ -1173,21 +1200,24 @@ void init_kvm_arch(void)
 		 */
 		madvise(guest_mem, guest_size, MADV_MERGEABLE);
 		if (verbose)
-			fprintf(stderr, "Uhyve uses KSM feature \"mergeable\" to reduce the memory footprint.\n");
+			fprintf(
+				stderr,
+				"Uhyve uses KSM feature \"mergeable\" to reduce the memory footprint.\n");
 	}
 
-	const char* hugepage = getenv("HERMIT_HUGEPAGE");
+	const char *hugepage = getenv("HERMIT_HUGEPAGE");
 	if (!(hugepage && (strcmp(hugepage, "0") == 0))) {
 		madvise(guest_mem, guest_size, MADV_HUGEPAGE);
 		if (verbose)
-			fprintf(stderr, "Uhyvde uses huge pages to improve the performance.\n");
+			fprintf(stderr,
+					"Uhyvde uses huge pages to improve the performance.\n");
 	}
 
 	struct kvm_userspace_memory_region kvm_region = {
-		.slot = 0,
+		.slot			 = 0,
 		.guest_phys_addr = GUEST_OFFSET,
-		.memory_size = guest_size,
-		.userspace_addr = (uint64_t) guest_mem,
+		.memory_size	 = guest_size,
+		.userspace_addr  = (uint64_t)guest_mem,
 #ifdef USE_DIRTY_LOG
 		.flags = KVM_MEM_LOG_DIRTY_PAGES,
 #else
@@ -1201,10 +1231,12 @@ void init_kvm_arch(void)
 		kvm_region.memory_size = KVM_32BIT_GAP_START - GUEST_OFFSET;
 		kvm_ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &kvm_region);
 
-		kvm_region.slot = 1;
+		kvm_region.slot			   = 1;
 		kvm_region.guest_phys_addr = KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE;
-		kvm_region.userspace_addr = (uint64_t) guest_mem + KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE;
-		kvm_region.memory_size = guest_size - KVM_32BIT_GAP_SIZE - KVM_32BIT_GAP_START + GUEST_OFFSET;
+		kvm_region.userspace_addr =
+			(uint64_t)guest_mem + KVM_32BIT_GAP_START + KVM_32BIT_GAP_SIZE;
+		kvm_region.memory_size = guest_size - KVM_32BIT_GAP_SIZE -
+								 KVM_32BIT_GAP_START + GUEST_OFFSET;
 		kvm_ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, &kvm_region);
 	}
 
@@ -1213,9 +1245,10 @@ void init_kvm_arch(void)
 #ifdef KVM_CAP_X2APIC_API
 	// enable x2APIC support
 	struct kvm_enable_cap cap = {
-		.cap = KVM_CAP_X2APIC_API,
-		.flags = 0,
-		.args[0] = KVM_X2APIC_API_USE_32BIT_IDS|KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK,
+		.cap	 = KVM_CAP_X2APIC_API,
+		.flags   = 0,
+		.args[0] = KVM_X2APIC_API_USE_32BIT_IDS |
+				   KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK,
 	};
 	kvm_ioctl(vmfd, KVM_ENABLE_CAP, &cap);
 #endif
@@ -1224,61 +1257,66 @@ void init_kvm_arch(void)
 	struct kvm_irqchip chip;
 	chip.chip_id = KVM_IRQCHIP_IOAPIC;
 	kvm_ioctl(vmfd, KVM_GET_IRQCHIP, &chip);
-	for(int i=0; i<KVM_IOAPIC_NUM_PINS; i++) {
-		chip.chip.ioapic.redirtbl[i].fields.vector = 0x20+i;
-		chip.chip.ioapic.redirtbl[i].fields.delivery_mode = 0;
-		chip.chip.ioapic.redirtbl[i].fields.dest_mode = 0;
+	for (int i = 0; i < KVM_IOAPIC_NUM_PINS; i++) {
+		chip.chip.ioapic.redirtbl[i].fields.vector			= 0x20 + i;
+		chip.chip.ioapic.redirtbl[i].fields.delivery_mode   = 0;
+		chip.chip.ioapic.redirtbl[i].fields.dest_mode		= 0;
 		chip.chip.ioapic.redirtbl[i].fields.delivery_status = 0;
-		chip.chip.ioapic.redirtbl[i].fields.polarity = 0;
-		chip.chip.ioapic.redirtbl[i].fields.remote_irr = 0;
-		chip.chip.ioapic.redirtbl[i].fields.trig_mode = 0;
-		chip.chip.ioapic.redirtbl[i].fields.mask = i != 2 ? 0 : 1;
-		chip.chip.ioapic.redirtbl[i].fields.dest_id = 0;
+		chip.chip.ioapic.redirtbl[i].fields.polarity		= 0;
+		chip.chip.ioapic.redirtbl[i].fields.remote_irr		= 0;
+		chip.chip.ioapic.redirtbl[i].fields.trig_mode		= 0;
+		chip.chip.ioapic.redirtbl[i].fields.mask			= i != 2 ? 0 : 1;
+		chip.chip.ioapic.redirtbl[i].fields.dest_id			= 0;
 	}
 	kvm_ioctl(vmfd, KVM_SET_IRQCHIP, &chip);
 
 	// try to detect KVM extensions
-	cap_tsc_deadline = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_TSC_DEADLINE_TIMER) <= 0 ? false : true;
-	cap_irqchip = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_IRQCHIP) <= 0 ? false : true;
+	cap_tsc_deadline =
+		kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_TSC_DEADLINE_TIMER) <= 0
+			? false
+			: true;
+	cap_irqchip = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_IRQCHIP) <= 0
+					  ? false
+					  : true;
 #ifdef KVM_CLOCK_TSC_STABLE
-	cap_adjust_clock_stable = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_ADJUST_CLOCK) == KVM_CLOCK_TSC_STABLE ? true : false;
+	cap_adjust_clock_stable =
+		kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_ADJUST_CLOCK) ==
+				KVM_CLOCK_TSC_STABLE
+			? true
+			: false;
 #endif
-	cap_irqfd = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_IRQFD) <= 0 ? false : true;
-	if (!cap_irqfd)
-		err(1, "the support of KVM_CAP_IRQFD is curently required");
+	cap_irqfd =
+		kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_IRQFD) <= 0 ? false : true;
+	if (!cap_irqfd) err(1, "the support of KVM_CAP_IRQFD is curently required");
 	// TODO: add VAPIC support
-	cap_vapic = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_VAPIC) <= 0 ? false : true;
-	//if (cap_vapic)
+	cap_vapic =
+		kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_VAPIC) <= 0 ? false : true;
+	// if (cap_vapic)
 	//	printf("System supports vapic\n");
 }
 
-int load_kernel(uint8_t* mem, char* path)
-{
-	Elf64_Ehdr hdr;
+int load_kernel(uint8_t *mem, char *path) {
+	Elf64_Ehdr  hdr;
 	Elf64_Phdr *phdr = NULL;
-	size_t buflen;
-	size_t pstart = 0;
-	int fd, ret;
+	size_t		buflen;
+	size_t		pstart = 0;
+	int			fd, ret;
 
 	fd = open(path, O_RDONLY);
-	if (fd == -1)
-	{
+	if (fd == -1) {
 		perror("Unable to open file");
 		return -1;
 	}
 
 	ret = pread_in_full(fd, &hdr, sizeof(hdr), 0);
-	if (ret < 0)
-		goto out;
+	if (ret < 0) goto out;
 
 	//  check if the program is a HermitCore file
-	if (hdr.e_ident[EI_MAG0] != ELFMAG0
-	    || hdr.e_ident[EI_MAG1] != ELFMAG1
-	    || hdr.e_ident[EI_MAG2] != ELFMAG2
-	    || hdr.e_ident[EI_MAG3] != ELFMAG3
-	    || hdr.e_ident[EI_CLASS] != ELFCLASS64
-	    || hdr.e_ident[EI_OSABI] != HERMIT_ELFOSABI
-	    || hdr.e_type != ET_EXEC || hdr.e_machine != EM_X86_64) {
+	if (hdr.e_ident[EI_MAG0] != ELFMAG0 || hdr.e_ident[EI_MAG1] != ELFMAG1 ||
+		hdr.e_ident[EI_MAG2] != ELFMAG2 || hdr.e_ident[EI_MAG3] != ELFMAG3 ||
+		hdr.e_ident[EI_CLASS] != ELFCLASS64 ||
+		hdr.e_ident[EI_OSABI] != HERMIT_ELFOSABI || hdr.e_type != ET_EXEC ||
+		hdr.e_machine != EM_X86_64) {
 		fprintf(stderr, "Invalid HermitCore file!\n");
 		ret = -1;
 		goto out;
@@ -1287,7 +1325,7 @@ int load_kernel(uint8_t* mem, char* path)
 	elf_entry = hdr.e_entry;
 
 	buflen = hdr.e_phentsize * hdr.e_phnum;
-	phdr = malloc(buflen);
+	phdr   = malloc(buflen);
 	if (!phdr) {
 		fprintf(stderr, "Not enough memory\n");
 		ret = -1;
@@ -1295,138 +1333,149 @@ int load_kernel(uint8_t* mem, char* path)
 	}
 
 	ret = pread_in_full(fd, phdr, buflen, hdr.e_phoff);
-	if (ret < 0)
-		goto out;
+	if (ret < 0) goto out;
 
 	/*
 	 * Load all segments with type "LOAD" from the file at offset
 	 * p_offset, and copy that into in memory.
 	 */
-	for (Elf64_Half ph_i = 0; ph_i < hdr.e_phnum; ph_i++)
-	{
-		uint64_t paddr = phdr[ph_i].p_paddr;
-		size_t offset = phdr[ph_i].p_offset;
-		size_t filesz = phdr[ph_i].p_filesz;
-		size_t memsz = phdr[ph_i].p_memsz;
+	for (Elf64_Half ph_i = 0; ph_i < hdr.e_phnum; ph_i++) {
+		uint64_t paddr  = phdr[ph_i].p_paddr;
+		size_t   offset = phdr[ph_i].p_offset;
+		size_t   filesz = phdr[ph_i].p_filesz;
+		size_t   memsz  = phdr[ph_i].p_memsz;
 
-		if (phdr[ph_i].p_type != PT_LOAD)
-			continue;
+		if (phdr[ph_i].p_type != PT_LOAD) continue;
 
-		//printf("Kernel location 0x%zx, file size 0x%zx, memory size 0x%zx\n", paddr, filesz, memsz);
+		// printf("Kernel location 0x%zx, file size 0x%zx, memory size 0x%zx\n",
+		// paddr, filesz, memsz);
 
-		ret = pread_in_full(fd, mem+paddr-GUEST_OFFSET, filesz, offset);
-		if (ret < 0)
-			goto out;
-		if (!klog)
-			klog = mem+paddr+0x5000-GUEST_OFFSET;
-		if (!mboot)
-			mboot = mem+paddr-GUEST_OFFSET;
+		ret = pread_in_full(fd, mem + paddr - GUEST_OFFSET, filesz, offset);
+		if (ret < 0) goto out;
+		if (!klog) klog = mem + paddr + 0x5000 - GUEST_OFFSET;
+		if (!mboot) mboot = mem + paddr - GUEST_OFFSET;
 
 		if (!pstart) {
 			pstart = paddr;
 
 			// initialize kernel
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x08)) = paddr; // physical start address
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x10)) = guest_size;   // physical limit
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x18)) = get_cpufreq();
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x24)) = 1; // number of used cpus
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x30)) = 0; // apicid
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x60)) = 1; // numa nodes
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x94)) = 1; // announce uhyve
+			*((uint64_t *)(mem + paddr - GUEST_OFFSET + 0x08)) =
+				paddr; // physical start address
+			*((uint64_t *)(mem + paddr - GUEST_OFFSET + 0x10)) =
+				guest_size; // physical limit
+			*((uint32_t *)(mem + paddr - GUEST_OFFSET + 0x18)) = get_cpufreq();
+			*((uint32_t *)(mem + paddr - GUEST_OFFSET + 0x24)) =
+				1; // number of used cpus
+			*((uint32_t *)(mem + paddr - GUEST_OFFSET + 0x30)) = 0; // apicid
+			*((uint32_t *)(mem + paddr - GUEST_OFFSET + 0x60)) =
+				1; // numa nodes
+			*((uint32_t *)(mem + paddr - GUEST_OFFSET + 0x94)) =
+				1; // announce uhyve
 			if (verbose)
-				*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x98)) = UHYVE_UART_PORT	; // announce uhyve
+				*((uint64_t *)(mem + paddr - GUEST_OFFSET + 0x98)) =
+					UHYVE_UART_PORT; // announce uhyve
 
-			char* str = getenv("HERMIT_IP");
+			char *str = getenv("HERMIT_IP");
 			if (str) {
 				uint32_t ip[4];
 
-				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB0)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB1)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB2)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB3)) = (uint8_t) ip[3];
+				sscanf(str, "%u.%u.%u.%u", ip + 0, ip + 1, ip + 2, ip + 3);
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB0)) =
+					(uint8_t)ip[0];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB1)) =
+					(uint8_t)ip[1];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB2)) =
+					(uint8_t)ip[2];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB3)) =
+					(uint8_t)ip[3];
 			}
 
 			str = getenv("HERMIT_GATEWAY");
 			if (str) {
 				uint32_t ip[4];
 
-				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB4)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB5)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB6)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB7)) = (uint8_t) ip[3];
+				sscanf(str, "%u.%u.%u.%u", ip + 0, ip + 1, ip + 2, ip + 3);
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB4)) =
+					(uint8_t)ip[0];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB5)) =
+					(uint8_t)ip[1];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB6)) =
+					(uint8_t)ip[2];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB7)) =
+					(uint8_t)ip[3];
 			}
 			str = getenv("HERMIT_MASK");
 			if (str) {
 				uint32_t ip[4];
 
-				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB8)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB9)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xBA)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xBB)) = (uint8_t) ip[3];
+				sscanf(str, "%u.%u.%u.%u", ip + 0, ip + 1, ip + 2, ip + 3);
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB8)) =
+					(uint8_t)ip[0];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xB9)) =
+					(uint8_t)ip[1];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xBA)) =
+					(uint8_t)ip[2];
+				*((uint8_t *)(mem + paddr - GUEST_OFFSET + 0xBB)) =
+					(uint8_t)ip[3];
 			}
 
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xbc)) = (uint64_t)guest_mem;
+			*((uint64_t *)(mem + paddr - GUEST_OFFSET + 0xbc)) =
+				(uint64_t)guest_mem;
 		}
-		*((uint64_t*) (mem+pstart-GUEST_OFFSET + 0x38)) = paddr + memsz - pstart; // total kernel size
+		*((uint64_t *)(mem + pstart - GUEST_OFFSET + 0x38)) =
+			paddr + memsz - pstart; // total kernel size
 	}
 
 	ret = 0;
 
 out:
-	if (phdr)
-		free(phdr);
+	if (phdr) free(phdr);
 
 	close(fd);
 
 	return ret;
 }
 
-static void virt_to_phys_for_table(
-	const size_t virtual_address,
-	size_t* const physical_address,
-	size_t* const physical_address_page_end,
-	size_t* const table,
-	const size_t level
-)
-{
-	const size_t index = virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
-	const size_t page_mask = ((~0UL) << PAGE_BITS << level * PAGE_MAP_BITS) & ~PG_XD;
+static void virt_to_phys_for_table(const size_t  virtual_address,
+								   size_t *const physical_address,
+								   size_t *const physical_address_page_end,
+								   size_t *const table,
+								   const size_t  level) {
+	const size_t index =
+		virtual_address >> PAGE_BITS >> level * PAGE_MAP_BITS & PAGE_MAP_MASK;
+	const size_t page_mask =
+		((~0UL) << PAGE_BITS << level * PAGE_MAP_BITS) & ~PG_XD;
 	const size_t page_size = PAGE_SIZE << level * PAGE_MAP_BITS;
 
-	if (table[index] & PG_PRESENT)
-	{
-		if (level == 0 || (level < 3 && table[index] & PG_PSE))
-		{
+	if (table[index] & PG_PRESENT) {
+		if (level == 0 || (level < 3 && table[index] & PG_PSE)) {
 			const size_t phy = table[index] & page_mask;
 			const size_t off = virtual_address & ~page_mask;
 
-			*physical_address = phy | off;
+			*physical_address		   = phy | off;
 			*physical_address_page_end = phy + page_size;
-		}
-		else
-		{
-			const size_t phy = table[index] & PAGE_MASK;
-			size_t* const subtable = (size_t*) (guest_mem+phy);
+		} else {
+			const size_t  phy	  = table[index] & PAGE_MASK;
+			size_t *const subtable = (size_t *)(guest_mem + phy);
 
-			virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, subtable, level - 1);
+			virt_to_phys_for_table(virtual_address,
+								   physical_address,
+								   physical_address_page_end,
+								   subtable,
+								   level - 1);
 		}
 	}
 }
 
-void virt_to_phys(
-	const size_t virtual_address,
-	size_t* const physical_address,
-	size_t* const physical_address_page_end
-)
-{
-	size_t* const pml4 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
+void virt_to_phys(const size_t  virtual_address,
+				  size_t *const physical_address,
+				  size_t *const physical_address_page_end) {
+	size_t *const pml4 = (size_t *)(guest_mem + elf_entry + PAGE_SIZE);
 
-	*physical_address = 0;
+	*physical_address		   = 0;
 	*physical_address_page_end = 0;
 
-	virt_to_phys_for_table(virtual_address, physical_address, physical_address_page_end, pml4, 3);
+	virt_to_phys_for_table(
+		virtual_address, physical_address, physical_address_page_end, pml4, 3);
 }
 #endif

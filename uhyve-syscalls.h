@@ -18,20 +18,20 @@
 #ifndef UHYVE_SYSCALLS_H
 #define UHYVE_SYSCALLS_H
 
-#include <unistd.h>
 #include <stddef.h>
+#include <unistd.h>
 
 typedef struct {
-	int fd;
-	const char* buf;
-	size_t len;
+	int			fd;
+	const char *buf;
+	size_t		len;
 } __attribute__((packed)) uhyve_write_t;
 
 typedef struct {
-	const char* name;
-	int flags;
-	int mode;
-	int ret;
+	const char *name;
+	int			flags;
+	int			mode;
+	int			ret;
 } __attribute__((packed)) uhyve_open_t;
 
 typedef struct {
@@ -40,22 +40,22 @@ typedef struct {
 } __attribute__((packed)) uhyve_close_t;
 
 typedef struct {
-	int fd;
-	char* buf;
-	size_t len;
+	int		fd;
+	char *  buf;
+	size_t  len;
 	ssize_t ret;
 } __attribute__((packed)) uhyve_read_t;
 
 typedef struct {
-	int fd;
+	int   fd;
 	off_t offset;
-	int whence;
+	int   whence;
 } __attribute__((packed)) uhyve_lseek_t;
 
 typedef struct {
 	uint64_t rip;
 	uint64_t addr;
-	int success;
-} __attribute__ ((packed)) uhyve_pfault_t;
+	int		 success;
+} __attribute__((packed)) uhyve_pfault_t;
 
 #endif // UHYVE_SYSCALLS_H
