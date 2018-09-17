@@ -20,7 +20,7 @@ else
 fi
 
 for file in ${changed_files}; do
-	file_diff=$(diff -u ${file} <(clang-format-7 ${file}) || true)
+	file_diff=$(diff -u ${file} <(clang-format-6.0 ${file}) || true)
     if ! [ -z "${file_diff}" ]; then
         echo "[ERROR] ${file} needs to be formated in accordance with the .clang-format. Abort!"
         fail=1
