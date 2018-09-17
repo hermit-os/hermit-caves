@@ -1,6 +1,3 @@
-#![feature(untagged_unions)]
-#![feature(core_intrinsics)]
-#![feature(unique)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
@@ -13,6 +10,9 @@ extern crate inotify;
 extern crate byteorder;
 extern crate raw_cpuid;
 extern crate rand;
+
+#[macro_use]
+extern crate bitflags;
 
 #[macro_use]
 extern crate chan;

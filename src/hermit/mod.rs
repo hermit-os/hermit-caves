@@ -47,7 +47,9 @@ pub struct IsleParameterUhyve {
     full_checkpoint: bool,
     migration_support: Option<Ipv4Addr>,
     migration_type: Option<MigrationType>,
-    migration_server: bool
+    migration_server: bool,
+    hugepage: bool,
+    mergable: bool
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +100,8 @@ impl IsleParameter {
                 let migration_support = IsleParameter::parse_ip("HERMIT_MIGRATION_SUPPORT");
                 let migration_type = env::var("HERMIT_MIGRATION_TYPE").map(|x| x.parse::<MigrationType>().map(|x| Some(x)).unwrap_or(None)).unwrap_or(None);
                 let migration_server = IsleParameter::parse_bool("HERMIT_MIGRATION_SERVER", false);
+                let hugepage = IsleParameter::parse_bool("HERMIT_HUGEPAGE", true);
+                let mergable = IsleParameter::parse_bool("HERMIT_MERGEABLE", false);
 
                 IsleParameter::UHyve {
                     mem_size: mem_size,
@@ -112,7 +116,9 @@ impl IsleParameter {
                         full_checkpoint: full_checkpoint,
                         migration_support: migration_support,
                         migration_type: migration_type,
-                        migration_server: migration_server
+                        migration_server: migration_server,
+                        hugepage: hugepage,
+                        mergable: mergable
                     }
                 }
             },

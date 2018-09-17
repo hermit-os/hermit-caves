@@ -203,7 +203,6 @@ impl Syscall {
                 (*obj).offset = lseek((*obj).fd, (*obj).offset, (*obj).whence);
             },
             Syscall::NetInfo(obj) => {
-                println!("info");
                 if net_if.is_some() {
                     match Option::as_ref(&net_if) {
                         Some(net) => {
