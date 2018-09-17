@@ -24,12 +24,11 @@ SpacesInCStyleCastParentheses: false
 SpaceBeforeAssignmentOperators: true
 IndentFunctionDeclarationAfterType: false
 ContinuationIndentWidth: 4
-CommentPragmas:  '^ IWYU pragma:'
 SpacesBeforeTrailingComments: 1
 SpacesInAngles: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
-UseTab: Always
+UseTab: ForIndentation
 AlignEscapedNewlines: Left
 AlignConsecutiveAssignments: true
 AlignConsecutiveDeclarations: false
