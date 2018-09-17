@@ -30,36 +30,37 @@
 
 #define _GNU_SOURCE
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <err.h>
 #include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <assert.h>
-#include <stdbool.h>
 #include <ctype.h>
 #include <linux/kvm.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <stdbool.h>
+#include <sys/socket.h>
 
-#include "uhyve.h"
-#include "uhyve-gdb.h"
 #include "queue.h"
+#include "uhyve-gdb.h"
+#include "uhyve.h"
 
 /* This is the trap instruction used for software breakpoints. */
 #ifdef __aarch64__
 #ifndef offsetof
-#define offsetof(TYPE, MEMBER)	((size_t) &((TYPE *)0)->MEMBER)
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
 #endif
-#define ARM64_CORE_REG(x)	(KVM_REG_ARM64 | KVM_REG_SIZE_U64 |\
-				 KVM_REG_ARM_CORE | KVM_REG_ARM_CORE_REG(x))
+#define ARM64_CORE_REG(x)                                  \
+	(KVM_REG_ARM64 | KVM_REG_SIZE_U64 | KVM_REG_ARM_CORE | \
+	 KVM_REG_ARM_CORE_REG(x))
 
 static const uint32_t brk_1 = 0xd4200020;
 #else
@@ -75,7 +76,7 @@ struct breakpoint_t {
 #ifdef __aarch64__
 	uint32_t saved_insn;
 #else
-	uint8_t saved_insn;	/* for software breakpoints */
+	uint8_t saved_insn; /* for software breakpoints */
 #endif
 
 	SLIST_ENTRY(breakpoint_t) entries;
@@ -86,17 +87,17 @@ static struct breakpoints_head sw_breakpoints;
 static struct breakpoints_head hw_breakpoints;
 
 /* The Intel SDM specifies that the DR7 has space for 4 breakpoints. */
-#define MAX_HW_BREAKPOINTS             4
+#define MAX_HW_BREAKPOINTS 4
 static uint32_t nr_hw_breakpoints = 0;
 
 /* Stepping is disabled by default. */
 static bool stepping = false;
 
-static int socket_fd = 0;
-static int portno = 1234;	/* Default port number */
+static int socket_fd		 = 0;
+static int portno			 = 1234; /* Default port number */
 static const char hexchars[] = "0123456789abcdef";
 
-#define BUFMAX                         4096
+#define BUFMAX 4096
 static char in_buffer[BUFMAX];
 static unsigned char registers[BUFMAX];
 
@@ -105,22 +106,18 @@ extern size_t guest_size;
 extern uint8_t *guest_mem;
 extern uint32_t ncores;
 
-void *uhyve_checked_gpa_p(uint64_t gpa, size_t sz, uint8_t * chk_guest_mem,
-			  size_t chk_guest_size, const char *file, int line);
+void *uhyve_checked_gpa_p(uint64_t gpa, size_t sz, uint8_t *chk_guest_mem,
+						  size_t chk_guest_size, const char *file, int line);
 
 /* The actual error code is ignored by GDB, so any number will do. */
-#define GDB_ERROR_MSG                  "E01"
+#define GDB_ERROR_MSG "E01"
 
 extern uint64_t aarch64_virt_to_phys(uint64_t vaddr);
 
-static int hex(unsigned char ch)
-{
-	if ((ch >= 'a') && (ch <= 'f'))
-		return (ch - 'a' + 10);
-	if ((ch >= '0') && (ch <= '9'))
-		return (ch - '0');
-	if ((ch >= 'A') && (ch <= 'F'))
-		return (ch - 'A' + 10);
+static int hex(unsigned char ch) {
+	if ((ch >= 'a') && (ch <= 'f')) return (ch - 'a' + 10);
+	if ((ch >= '0') && (ch <= '9')) return (ch - '0');
+	if ((ch >= 'A') && (ch <= 'F')) return (ch - 'A' + 10);
 
 	return -1;
 }
@@ -129,13 +126,12 @@ static int hex(unsigned char ch)
  * Converts the (count) bytes of memory pointed to by mem into an hex string in
  * buf. Returns a pointer to the last char put in buf (null).
  */
-static char *mem2hex(const unsigned char *mem, char *buf, size_t count)
-{
+static char *mem2hex(const unsigned char *mem, char *buf, size_t count) {
 	size_t i;
 	unsigned char ch;
 
 	for (i = 0; i < count; i++) {
-		ch = *mem++;
+		ch	 = *mem++;
 		*buf++ = hexchars[ch >> 4];
 		*buf++ = hexchars[ch % 16];
 	}
@@ -147,23 +143,22 @@ static char *mem2hex(const unsigned char *mem, char *buf, size_t count)
  * Converts the hex string in buf into binary in mem.
  * Returns a pointer to the character AFTER the last byte written.
  */
-static unsigned char *hex2mem(const char *buf, unsigned char *mem, size_t count)
-{
+static unsigned char *hex2mem(const char *buf, unsigned char *mem,
+							  size_t count) {
 	size_t i;
 	unsigned char ch;
 
 	assert(strlen(buf) >= (2 * count));
 
 	for (i = 0; i < count; i++) {
-		ch = hex(*buf++) << 4;
-		ch = ch + hex(*buf++);
+		ch	 = hex(*buf++) << 4;
+		ch	 = ch + hex(*buf++);
 		*mem++ = ch;
 	}
 	return mem;
 }
 
-static int wait_for_connect(void)
-{
+static int wait_for_connect(void) {
 	int listen_socket_fd;
 	struct sockaddr_in server_addr, client_addr;
 	struct protoent *protoent;
@@ -178,15 +173,18 @@ static int wait_for_connect(void)
 	}
 
 	opt = 1;
-	if (setsockopt(listen_socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
+	if (setsockopt(
+			listen_socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) ==
+		-1)
 		err(1, "setsockopt(SO_REUSEADDR) failed");
 
-	server_addr.sin_family = AF_INET;
+	server_addr.sin_family		= AF_INET;
 	server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	server_addr.sin_port = htons(portno);
+	server_addr.sin_port		= htons(portno);
 
-	if (bind(listen_socket_fd, (struct sockaddr *)&server_addr,
-		 sizeof(server_addr)) == -1) {
+	if (bind(listen_socket_fd,
+			 (struct sockaddr *)&server_addr,
+			 sizeof(server_addr)) == -1) {
 		err(1, "bind failed");
 		return -1;
 	}
@@ -199,9 +197,8 @@ static int wait_for_connect(void)
 	warnx("Waiting for a debugger. Connect to it like this:");
 	warnx("\tgdb --ex=\"target remote localhost:%d\" UNIKERNEL", portno);
 
-	len = sizeof(client_addr);
-	socket_fd =
-	    accept(listen_socket_fd, (struct sockaddr *)&client_addr, &len);
+	len		  = sizeof(client_addr);
+	socket_fd = accept(listen_socket_fd, (struct sockaddr *)&client_addr, &len);
 	if (socket_fd == -1) {
 		err(1, "accept failed");
 		return -1;
@@ -216,8 +213,8 @@ static int wait_for_connect(void)
 	}
 
 	opt = 1;
-	if (setsockopt(socket_fd, protoent->p_proto, TCP_NODELAY, &opt,
-		       sizeof(opt)) == -1)
+	if (setsockopt(
+			socket_fd, protoent->p_proto, TCP_NODELAY, &opt, sizeof(opt)) == -1)
 		err(1, "setsockopt(TCP_NODELAY) failed");
 
 	ip_addr.s_addr = client_addr.sin_addr.s_addr;
@@ -226,14 +223,12 @@ static int wait_for_connect(void)
 	return 0;
 }
 
-static inline int send_char(char ch)
-{
+static inline int send_char(char ch) {
 	/* TCP is already buffering, so no need to buffer here as well. */
 	return send(socket_fd, &ch, 1, 0);
 }
 
-static char recv_char(void)
-{
+static char recv_char(void) {
 	unsigned char ch;
 	int ret;
 
@@ -260,8 +255,7 @@ static char recv_char(void)
  * Scan for the sequence $<data>#<checksum>
  * Returns a null terminated string.
  */
-static char *recv_packet(void)
-{
+static char *recv_packet(void) {
 	char *buffer = &in_buffer[0];
 	unsigned char checksum;
 	unsigned char xmitcsum;
@@ -272,55 +266,48 @@ static char *recv_packet(void)
 		/* wait around for the start character, ignore all other characters */
 		do {
 			ch = recv_char();
-			if (ch == -1)
-				return NULL;
-		}
-		while (ch != '$');
+			if (ch == -1) return NULL;
+		} while (ch != '$');
 
- retry:
+	retry:
 		checksum = 0;
 		xmitcsum = -1;
-		count = 0;
+		count	= 0;
 
 		/* now, read until a # or end of buffer is found */
 		while (count < BUFMAX - 1) {
 			ch = recv_char();
-			if (ch == -1)
-				return NULL;
-			if (ch == '$')
-				goto retry;
-			if (ch == '#')
-				break;
-			checksum = checksum + ch;
+			if (ch == -1) return NULL;
+			if (ch == '$') goto retry;
+			if (ch == '#') break;
+			checksum	  = checksum + ch;
 			buffer[count] = ch;
-			count = count + 1;
+			count		  = count + 1;
 		}
 		/* Let's make this a C string. */
 		buffer[count] = '\0';
 
 		if (ch == '#') {
 			ch = recv_char();
-			if (ch == -1)
-				return NULL;
+			if (ch == -1) return NULL;
 			xmitcsum = hex(ch) << 4;
-			ch = recv_char();
-			if (ch == -1)
-				return NULL;
+			ch		 = recv_char();
+			if (ch == -1) return NULL;
 			xmitcsum += hex(ch);
 
 			if (checksum != xmitcsum) {
 				warnx("Failed checksum from GDB. "
-				      "My count = 0x%x, sent=0x%x. buf=%s",
-				      checksum, xmitcsum, buffer);
+					  "My count = 0x%x, sent=0x%x. buf=%s",
+					  checksum,
+					  xmitcsum,
+					  buffer);
 				if (send_char('-') == -1)
 					/* Unsuccessful reply to a failed checksum */
-					err(1,
-					    "GDB: Could not send an ACK to the debugger.");
+					err(1, "GDB: Could not send an ACK to the debugger.");
 			} else {
 				if (send_char('+') == -1)
 					/* Unsuccessful reply to a successful transfer */
-					err(1,
-					    "GDB: Could not send an ACK to the debugger.");
+					err(1, "GDB: Could not send an ACK to the debugger.");
 
 				/* if a sequence char is present, reply the sequence ID */
 				if (buffer[2] == ':') {
@@ -340,8 +327,7 @@ static char *recv_packet(void)
  * Send packet of the form $<packet info>#<checksum> without waiting for an ACK
  * from the debugger. Only send_response
  */
-static void send_packet_no_ack(char *buffer)
-{
+static void send_packet_no_ack(char *buffer) {
 	unsigned char checksum;
 	int count;
 	char ch;
@@ -355,7 +341,7 @@ static void send_packet_no_ack(char *buffer)
 
 	send_char('$');
 	checksum = 0;
-	count = 0;
+	count	= 0;
 
 	ch = buffer[count];
 	while (ch) {
@@ -374,25 +360,31 @@ static void send_packet_no_ack(char *buffer)
  * Send a packet and wait for a successful ACK of '+' from the debugger.
  * An ACK of '-' means that we have to resend.
  */
-static void send_packet(char *buffer)
-{
+static void send_packet(char *buffer) {
 	char ch;
 
 	for (;;) {
 		send_packet_no_ack(buffer);
 		ch = recv_char();
-		if (ch == -1)
-			return;
-		if (ch == '+')
-			break;
+		if (ch == -1) return;
+		if (ch == '+') break;
 	}
 }
 
-#define send_error_msg()   do { send_packet(GDB_ERROR_MSG); } while (0)
+#define send_error_msg()            \
+	do {                            \
+		send_packet(GDB_ERROR_MSG); \
+	} while (0)
 
-#define send_not_supported_msg()   do { send_packet(""); } while (0)
+#define send_not_supported_msg() \
+	do {                         \
+		send_packet("");         \
+	} while (0)
 
-#define send_okay_msg()   do { send_packet("OK"); } while (0)
+#define send_okay_msg()    \
+	do {                   \
+		send_packet("OK"); \
+	} while (0)
 
 /*
  * This is a response to 'c' and 's'. In other words, the VM was
@@ -404,8 +396,7 @@ static void send_packet(char *buffer)
  *    - 'X AA' exited with signal AA
  * https://sourceware.org/gdb/onlinedocs/gdb/Stop-Reply-Packets.html
  */
-static void send_response(char code, int sigval, bool wait_for_ack)
-{
+static void send_response(char code, int sigval, bool wait_for_ack) {
 	char obuf[BUFMAX];
 	snprintf(obuf, sizeof(obuf), "%c%02x", code, sigval);
 	if (wait_for_ack)
@@ -414,8 +405,7 @@ static void send_response(char code, int sigval, bool wait_for_ack)
 		send_packet_no_ack(obuf);
 }
 
-static void gdb_handle_query(char* packet)
-{
+static void gdb_handle_query(char *packet) {
 	static uint64_t thread_counter = 0;
 	char obuf[BUFMAX];
 
@@ -441,8 +431,7 @@ static void gdb_handle_query(char* packet)
 	send_not_supported_msg();
 }
 
-static void gdb_handle_exception(int vcpufd, int sigval)
-{
+static void gdb_handle_exception(int vcpufd, int sigval) {
 	char *packet;
 	char obuf[BUFMAX];
 
@@ -460,8 +449,8 @@ static void gdb_handle_exception(int vcpufd, int sigval)
 			/* Without a packet with instructions with what to do next there is
 			 * really nothing we can do to recover. So, dying. */
 			errx(1,
-			     "GDB: Exiting as we could not receive the next command from "
-			     "the debugger.");
+				 "GDB: Exiting as we could not receive the next command from "
+				 "the debugger.");
 
 		/*
 		 * From the GDB manual:
@@ -473,167 +462,160 @@ static void gdb_handle_exception(int vcpufd, int sigval)
 		 */
 		command = packet[0];
 		switch (command) {
-		case 's':
-			{
-				/* Step */
-				if (sscanf(packet, "s%" PRIx64, &addr) == 1) {
-					/* not supported, but that's OK as GDB will retry with the
-					 * slower version of this: update all registers. */
-					send_not_supported_msg();
-					break;	/* Wait for another command. */
-				}
-				if (uhyve_gdb_enable_ss(vcpufd) == -1) {
-					send_error_msg();
-					break;	/* Wait for another command. */
-				}
-				return;	/* Continue with program */
+		case 's': {
+			/* Step */
+			if (sscanf(packet, "s%" PRIx64, &addr) == 1) {
+				/* not supported, but that's OK as GDB will retry with the
+				 * slower version of this: update all registers. */
+				send_not_supported_msg();
+				break; /* Wait for another command. */
+			}
+			if (uhyve_gdb_enable_ss(vcpufd) == -1) {
+				send_error_msg();
+				break; /* Wait for another command. */
+			}
+			return; /* Continue with program */
+		}
+
+		case 'c': {
+			/* Continue (and disable stepping for the next instruction) */
+			if (sscanf(packet, "c%" PRIx64, &addr) == 1) {
+				/* not supported, but that's OK as GDB will retry with the
+				 * slower version of this: update all registers. */
+				send_not_supported_msg();
+				break; /* Wait for another command. */
+			}
+			if (uhyve_gdb_disable_ss(vcpufd) == -1) {
+				send_error_msg();
+				break; /* Wait for another command. */
+			}
+			return; /* Continue with program */
+		}
+
+		case 'm': {
+			/* Read memory content */
+			if (sscanf(packet, "m%" PRIx64 ",%zx", &addr, &len) != 2) {
+				send_error_msg();
+				break;
+			}
+			/* translate addr into guest phys first. it is
+			 * needed if the address falls into the non directly mapped
+			 * part of the virtual address space (ex: heap/stack) */
+			uint64_t phys_addr;
+
+			if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
+				send_error_msg();
+			} else {
+				mem2hex(guest_mem + phys_addr, obuf, len);
+				send_packet(obuf);
+			}
+			break; /* Wait for another command. */
+		}
+
+		case 'M': {
+			/* Write memory content */
+			uint64_t phys_addr;
+
+			assert(strlen(packet) <= sizeof(obuf));
+			if (sscanf(packet, "M%" PRIx64 ",%zx:%s", &addr, &len, obuf) != 3) {
+				send_error_msg();
+				break;
 			}
 
-		case 'c':
-			{
-				/* Continue (and disable stepping for the next instruction) */
-				if (sscanf(packet, "c%" PRIx64, &addr) == 1) {
-					/* not supported, but that's OK as GDB will retry with the
-					 * slower version of this: update all registers. */
-					send_not_supported_msg();
-					break;	/* Wait for another command. */
-				}
-				if (uhyve_gdb_disable_ss(vcpufd) == -1) {
-					send_error_msg();
-					break;	/* Wait for another command. */
-				}
-				return;	/* Continue with program */
-			}
-
-		case 'm':
-			{
-				/* Read memory content */
-				if (sscanf(packet, "m%" PRIx64 ",%zx", &addr, &len) != 2) {
-					send_error_msg();
-					break;
-				}
-				/* translate addr into guest phys first. it is
-				 * needed if the address falls into the non directly mapped
-				 * part of the virtual address space (ex: heap/stack) */
-				uint64_t phys_addr;
-
-				if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
-					send_error_msg();
-				} else {
-					mem2hex(guest_mem + phys_addr, obuf, len);
-					send_packet(obuf);
-				}
-				break;	/* Wait for another command. */
-			}
-
-		case 'M':
-			{
-				/* Write memory content */
-				uint64_t phys_addr;
-
-				assert(strlen(packet) <= sizeof(obuf));
-				if (sscanf(packet, "M%" PRIx64 ",%zx:%s", &addr, &len, obuf) != 3) {
-					send_error_msg();
-					break;
-				}
-
-				/* translate to guest physical address first */
-				if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
-					send_error_msg();
-				} else {
-					hex2mem(obuf, guest_mem + phys_addr,
-						len);
-					send_okay_msg();
-				}
-				break;	/* Wait for another command. */
-			}
-
-		case 'g':
-			{
-				/* Read general registers */
-				len = BUFMAX;
-				if (uhyve_gdb_read_registers(vcpufd, registers, &len) == -1) {
-					send_error_msg();
-				} else {
-					mem2hex(registers, obuf, len);
-					send_packet(obuf);
-				}
-				break;	/* Wait for another command. */
-			}
-
-		case 'G':
-			{
-				/* Write general registers */
-				len = BUFMAX;
-				/* Call read_registers just to get len (not very efficient). */
-				if (uhyve_gdb_read_registers(vcpufd, registers, &len) == -1) {
-					send_error_msg();
-					break;
-				}
-				/* Packet looks like 'Gxxxxx', so we have to skip the first char */
-				hex2mem(packet + 1, registers, len);
-				if (uhyve_gdb_write_registers(vcpufd, registers, len) == -1) {
-					send_error_msg();
-					break;
-				}
+			/* translate to guest physical address first */
+			if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
+				send_error_msg();
+			} else {
+				hex2mem(obuf, guest_mem + phys_addr, len);
 				send_okay_msg();
-				break;	/* Wait for another command. */
 			}
+			break; /* Wait for another command. */
+		}
 
-		case '?':
-			{
-				/* Return last signal */
-				send_response('S', sigval, true);
-				break;	/* Wait for another command. */
+		case 'g': {
+			/* Read general registers */
+			len = BUFMAX;
+			if (uhyve_gdb_read_registers(vcpufd, registers, &len) == -1) {
+				send_error_msg();
+			} else {
+				mem2hex(registers, obuf, len);
+				send_packet(obuf);
 			}
+			break; /* Wait for another command. */
+		}
+
+		case 'G': {
+			/* Write general registers */
+			len = BUFMAX;
+			/* Call read_registers just to get len (not very efficient). */
+			if (uhyve_gdb_read_registers(vcpufd, registers, &len) == -1) {
+				send_error_msg();
+				break;
+			}
+			/* Packet looks like 'Gxxxxx', so we have to skip the first char */
+			hex2mem(packet + 1, registers, len);
+			if (uhyve_gdb_write_registers(vcpufd, registers, len) == -1) {
+				send_error_msg();
+				break;
+			}
+			send_okay_msg();
+			break; /* Wait for another command. */
+		}
+
+		case '?': {
+			/* Return last signal */
+			send_response('S', sigval, true);
+			break; /* Wait for another command. */
+		}
 
 		case 'Z':
 			/* Insert a breakpoint */
-		case 'z':
-			{
-				/* Remove a breakpoint */
-				packet++;
-				if (sscanf(packet, "%" PRIx32 ",%" PRIx64 ",%zx",
-				     &type, &addr, &len) != 3) {
+		case 'z': {
+			/* Remove a breakpoint */
+			packet++;
+			if (sscanf(packet,
+					   "%" PRIx32 ",%" PRIx64 ",%zx",
+					   &type,
+					   &addr,
+					   &len) != 3) {
+				send_error_msg();
+				break;
+			}
+			uint64_t phys_addr;
+			if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
+				send_error_msg();
+			} else {
+				if (command == 'Z')
+					ret =
+						uhyve_gdb_add_breakpoint(vcpufd, type, phys_addr, len);
+				else
+					ret = uhyve_gdb_remove_breakpoint(
+						vcpufd, type, phys_addr, len);
+
+				if (ret == -1)
 					send_error_msg();
-					break;
-				}
-				uint64_t phys_addr;
-				if (uhyve_gdb_guest_virt_to_phys(vcpufd, addr, &phys_addr)) {
-					send_error_msg();
-				} else {
-					if (command == 'Z')
-						ret = uhyve_gdb_add_breakpoint(vcpufd, type, phys_addr, len);
-					else
-						ret = uhyve_gdb_remove_breakpoint(vcpufd, type, phys_addr, len);
-
-					if (ret == -1)
-						send_error_msg();
-					else
-						send_okay_msg();
-				}
-				break;
+				else
+					send_okay_msg();
 			}
+			break;
+		}
 
-		case 'k':
-			{
-				warnx("Debugger asked us to quit");
-				send_okay_msg();
-				break;
-			}
+		case 'k': {
+			warnx("Debugger asked us to quit");
+			send_okay_msg();
+			break;
+		}
 
-		case 'q':
-			{
-				gdb_handle_query(packet);
-				break;
-			}
+		case 'q': {
+			gdb_handle_query(packet);
+			break;
+		}
 
-		case 'D':
-			{
-				warnx("Debugger detached");
-				send_okay_msg();
-				return;
-			}
+		case 'D': {
+			warnx("Debugger detached");
+			send_okay_msg();
+			return;
+		}
 
 		default:
 			send_not_supported_msg();
@@ -642,24 +624,22 @@ static void gdb_handle_exception(int vcpufd, int sigval)
 	}
 }
 
-void uhyve_gdb_handle_exception(int vcpufd, int sigval)
-{
+void uhyve_gdb_handle_exception(int vcpufd, int sigval) {
 	gdb_handle_exception(vcpufd, sigval);
 }
 
-static void gdb_stub_start(int vcpufd)
-{
+static void gdb_stub_start(int vcpufd) {
 	wait_for_connect();
 	gdb_handle_exception(vcpufd, GDB_SIGNAL_FIRST);
 }
 
-int uhyve_gdb_init(int vcpufd)
-{
+int uhyve_gdb_init(int vcpufd) {
 	/*
 	 * GDB clients can change memory, and software breakpoints work by
 	 * replacing instructions with int3's.
 	 */
-	if (mprotect(guest_mem, guest_size, PROT_READ | PROT_WRITE | PROT_EXEC) == -1)
+	if (mprotect(guest_mem, guest_size, PROT_READ | PROT_WRITE | PROT_EXEC) ==
+		-1)
 		err(1, "GDB: Cannot remove guest memory protection");
 
 	/* Notify the debugger that we are dying. */
@@ -670,15 +650,13 @@ int uhyve_gdb_init(int vcpufd)
 	return 0;
 }
 
-void uhyve_gdb_handle_term(void)
-{
+void uhyve_gdb_handle_term(void) {
 	/* TODO: this is graceful shutdown forcing the return value to zero,
 	 * any way to pass an error code when things go wrong ? */
 	send_response('W', 0, true);
 }
 
-static int kvm_arch_insert_sw_breakpoint(struct breakpoint_t *bp)
-{
+static int kvm_arch_insert_sw_breakpoint(struct breakpoint_t *bp) {
 #ifdef __aarch64__
 	uint32_t *insn = (uint32_t *)(bp->addr + guest_mem);
 #else
@@ -695,13 +673,12 @@ static int kvm_arch_insert_sw_breakpoint(struct breakpoint_t *bp)
 	 * consequence of this is that we don't have to set all other bytes as
 	 * NOP's.
 	 */
-	*insn = int3;
+	*insn		  = int3;
 #endif
 	return 0;
 }
 
-static int kvm_arch_remove_sw_breakpoint(struct breakpoint_t *bp)
-{
+static int kvm_arch_remove_sw_breakpoint(struct breakpoint_t *bp) {
 #ifdef __aarch64__
 	uint32_t *insn = (uint32_t *)(bp->addr + guest_mem);
 	assert(*insn == brk_1);
@@ -713,9 +690,8 @@ static int kvm_arch_remove_sw_breakpoint(struct breakpoint_t *bp)
 	return 0;
 }
 
-static int uhyve_gdb_update_guest_debug(int vcpufd)
-{
-	struct kvm_guest_debug dbg = { 0 };
+static int uhyve_gdb_update_guest_debug(int vcpufd) {
+	struct kvm_guest_debug dbg = {0};
 	struct breakpoint_t *bp;
 	const uint8_t type_code[] = {
 		/* Break on instruction execution only. */
@@ -725,21 +701,20 @@ static int uhyve_gdb_update_guest_debug(int vcpufd)
 		/* Break on data reads only. */
 		[GDB_WATCHPOINT_READ] = 0x2,
 		/* Break on data reads or writes but not instruction fetches. */
-		[GDB_WATCHPOINT_ACCESS] = 0x3
-	};
-	const uint8_t len_code[] = {
-		/*
-		 * 00 — 1-byte length.
-		 * 01 — 2-byte length.
-		 * 10 — 8-byte length.
-		 * 11 — 4-byte length.
-		 */
-		[1] = 0x0,[2] = 0x1,[4] = 0x3,[8] = 0x2
-	};
-	int n = 0;
+		[GDB_WATCHPOINT_ACCESS] = 0x3};
+	const uint8_t len_code[] = {/*
+								 * 00 — 1-byte length.
+								 * 01 — 2-byte length.
+								 * 10 — 8-byte length.
+								 * 11 — 4-byte length.
+								 */
+								[1] = 0x0,
+								[2] = 0x1,
+								[4] = 0x3,
+								[8] = 0x2};
+	int n					 = 0;
 
-	if (stepping)
-		dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
+	if (stepping) dbg.control = KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
 
 	if (!SLIST_EMPTY(&sw_breakpoints))
 		dbg.control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP;
@@ -758,11 +733,10 @@ static int uhyve_gdb_update_guest_debug(int vcpufd)
 			/* global breakpointing */
 			dbg.arch.debugreg[7] |= (2 << (n * 2));
 			/* read/write fields */
-			dbg.arch.debugreg[7] |=
-			    (type_code[bp->type] << (16 + n * 4));
+			dbg.arch.debugreg[7] |= (type_code[bp->type] << (16 + n * 4));
 			/* Length fields */
 			dbg.arch.debugreg[7] |=
-			    ((uint32_t) len_code[bp->len] << (18 + n * 4));
+				((uint32_t)len_code[bp->len] << (18 + n * 4));
 			n++;
 		}
 	}
@@ -774,15 +748,13 @@ static int uhyve_gdb_update_guest_debug(int vcpufd)
 }
 
 static struct breakpoint_t *bp_list_find(gdb_breakpoint_type type,
-					 uint64_t addr, size_t len)
-{
+										 uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	switch (type) {
 	case GDB_BREAKPOINT_SW:
 		SLIST_FOREACH(bp, &sw_breakpoints, entries) {
-			if (bp->addr == addr && bp->len == len)
-				return bp;
+			if (bp->addr == addr && bp->len == len) return bp;
 		}
 		break;
 
@@ -792,8 +764,7 @@ static struct breakpoint_t *bp_list_find(gdb_breakpoint_type type,
 	case GDB_WATCHPOINT_ACCESS:
 		/* We only support hardware watchpoints. */
 		SLIST_FOREACH(bp, &hw_breakpoints, entries) {
-			if (bp->addr == addr && bp->len == len)
-				return bp;
+			if (bp->addr == addr && bp->len == len) return bp;
 		}
 		break;
 
@@ -810,8 +781,7 @@ static struct breakpoint_t *bp_list_find(gdb_breakpoint_type type,
  * number of allowed hardware breakpoints (4).
  */
 static struct breakpoint_t *bp_list_insert(gdb_breakpoint_type type,
-					   uint64_t addr, size_t len)
-{
+										   uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	bp = bp_list_find(type, addr, len);
@@ -821,12 +791,11 @@ static struct breakpoint_t *bp_list_insert(gdb_breakpoint_type type,
 	}
 
 	bp = malloc(sizeof(struct breakpoint_t));
-	if (bp == NULL)
-		return NULL;
+	if (bp == NULL) return NULL;
 
-	bp->addr = addr;
-	bp->type = type;
-	bp->len = len;
+	bp->addr	 = addr;
+	bp->type	 = type;
+	bp->len		 = len;
 	bp->refcount = 1;
 
 	switch (type) {
@@ -839,8 +808,7 @@ static struct breakpoint_t *bp_list_insert(gdb_breakpoint_type type,
 	case GDB_WATCHPOINT_READ:
 	case GDB_WATCHPOINT_ACCESS:
 		/* We only support hardware watchpoints. */
-		if (nr_hw_breakpoints == MAX_HW_BREAKPOINTS)
-			return NULL;
+		if (nr_hw_breakpoints == MAX_HW_BREAKPOINTS) return NULL;
 		nr_hw_breakpoints++;
 		SLIST_INSERT_HEAD(&hw_breakpoints, bp, entries);
 		break;
@@ -856,17 +824,14 @@ static struct breakpoint_t *bp_list_insert(gdb_breakpoint_type type,
  * Removes a breakpoint from the list of breakpoints.
  * Returns -1 if the breakpoint is not in the list.
  */
-static int bp_list_remove(gdb_breakpoint_type type, uint64_t addr, size_t len)
-{
+static int bp_list_remove(gdb_breakpoint_type type, uint64_t addr, size_t len) {
 	struct breakpoint_t *bp = NULL;
 
 	bp = bp_list_find(type, addr, len);
-	if (!bp)
-		return -1;
+	if (!bp) return -1;
 
 	bp->refcount--;
-	if (bp->refcount > 0)
-		return 0;
+	if (bp->refcount > 0) return 0;
 
 	switch (type) {
 	case GDB_BREAKPOINT_SW:
@@ -891,13 +856,11 @@ static int bp_list_remove(gdb_breakpoint_type type, uint64_t addr, size_t len)
 	return 0;
 }
 
-int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
-{
+int uhyve_gdb_read_registers(int vcpufd, uint8_t *registers, size_t *len) {
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
 	int ret;
 
-	if (*len < sizeof(struct uhyve_gdb_regs))
-		return -1;
+	if (*len < sizeof(struct uhyve_gdb_regs)) return -1;
 
 	*len = sizeof(struct uhyve_gdb_regs);
 
@@ -909,12 +872,12 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 	uint32_t data32;
 
 	reg.addr = (uint64_t)&data32;
-	reg.id = ARM64_CORE_REG(regs.pstate);
+	reg.id   = ARM64_CORE_REG(regs.pstate);
 	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
 	gregs->cpsr = data32;
 
 	reg.addr = (uint64_t)&data;
-	reg.id = ARM64_CORE_REG(regs.pc);
+	reg.id   = ARM64_CORE_REG(regs.pc);
 	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
 	gregs->pc = data;
 
@@ -922,7 +885,7 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 	kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
 	gregs->sp = data;
 
-	for(int i=0; i<31; i++) {
+	for (int i = 0; i < 31; i++) {
 		reg.id = ARM64_CORE_REG(regs.regs[i]);
 		kvm_ioctl(vcpufd, KVM_GET_ONE_REG, &reg);
 		gregs->x[i] = data;
@@ -944,12 +907,12 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 	gregs->rbp = kregs.rbp;
 	gregs->rsp = kregs.rsp;
 
-	gregs->r8 = kregs.r8;
-	gregs->r9 = kregs.r9;
+	gregs->r8  = kregs.r8;
+	gregs->r9  = kregs.r9;
 	gregs->r10 = kregs.r10;
 	gregs->r11 = kregs.r11;
 
-	gregs->rip = kregs.rip;
+	gregs->rip	= kregs.rip;
 	gregs->eflags = kregs.rflags;
 
 	gregs->cs = sregs.cs.selector;
@@ -963,13 +926,11 @@ int uhyve_gdb_read_registers(int vcpufd, uint8_t * registers, size_t * len)
 	return 0;
 }
 
-int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
-{
+int uhyve_gdb_write_registers(int vcpufd, uint8_t *registers, size_t len) {
 	struct uhyve_gdb_regs *gregs = (struct uhyve_gdb_regs *)registers;
 	int ret;
 
-	if (len < sizeof(struct uhyve_gdb_regs))
-		return -1;
+	if (len < sizeof(struct uhyve_gdb_regs)) return -1;
 
 #ifdef __aarch64__
 	struct kvm_one_reg reg;
@@ -984,16 +945,16 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
 	reg.addr = (uint64_t)&data;
 
 	reg.id = ARM64_CORE_REG(regs.pc);
-	data = gregs->pc;
+	data   = gregs->pc;
 	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
 
 	reg.id = ARM64_CORE_REG(sp_el1);
-	data = gregs->sp;
+	data   = gregs->sp;
 	kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
 
-	for(int i=0; i<31; i++) {
+	for (int i = 0; i < 31; i++) {
 		reg.id = ARM64_CORE_REG(regs.regs[i]);
-		data = gregs->x[i];
+		data   = gregs->x[i];
 		kvm_ioctl(vcpufd, KVM_SET_ONE_REG, &reg);
 	}
 #else /* x86-64 */
@@ -1014,12 +975,12 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
 	kregs.rbp = gregs->rbp;
 	kregs.rsp = gregs->rsp;
 
-	kregs.r8 = gregs->r8;
-	kregs.r9 = gregs->r9;
+	kregs.r8  = gregs->r8;
+	kregs.r9  = gregs->r9;
 	kregs.r10 = gregs->r10;
 	kregs.r11 = gregs->r11;
 
-	kregs.rip = gregs->rip;
+	kregs.rip	= gregs->rip;
 	kregs.rflags = gregs->eflags;
 
 	/* XXX: not sure if just setting .selector is enough. */
@@ -1038,78 +999,64 @@ int uhyve_gdb_write_registers(int vcpufd, uint8_t * registers, size_t len)
 }
 
 int uhyve_gdb_add_breakpoint(int vcpufd, gdb_breakpoint_type type,
-	uint64_t addr, size_t len)
-{
+							 uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	assert(type < GDB_BREAKPOINT_MAX);
 
-	if (bp_list_find(type, addr, len))
-		return 0;
+	if (bp_list_find(type, addr, len)) return 0;
 
 	bp = bp_list_insert(type, addr, len);
-	if (bp == NULL)
-		return -1;
+	if (bp == NULL) return -1;
 
 #ifdef __aarch64__
-	if(type != GDB_BREAKPOINT_SW)
-		return -1;
+	if (type != GDB_BREAKPOINT_SW) return -1;
 #endif
 
-	if (type == GDB_BREAKPOINT_SW)
-		kvm_arch_insert_sw_breakpoint(bp);
+	if (type == GDB_BREAKPOINT_SW) kvm_arch_insert_sw_breakpoint(bp);
 
-	if (uhyve_gdb_update_guest_debug(vcpufd) == -1)
-		return -1;
+	if (uhyve_gdb_update_guest_debug(vcpufd) == -1) return -1;
 
 	return 0;
 }
 
 int uhyve_gdb_remove_breakpoint(int vcpufd, gdb_breakpoint_type type,
-	uint64_t addr, size_t len)
-{
+								uint64_t addr, size_t len) {
 	struct breakpoint_t *bp;
 
 	assert(type < GDB_BREAKPOINT_MAX);
 
 	if (type == GDB_BREAKPOINT_SW) {
 		bp = bp_list_find(type, addr, len);
-		if (bp)
-			kvm_arch_remove_sw_breakpoint(bp);
+		if (bp) kvm_arch_remove_sw_breakpoint(bp);
 	}
 
-	if (bp_list_remove(type, addr, len) == -1)
-		return -1;
+	if (bp_list_remove(type, addr, len) == -1) return -1;
 
-	if (uhyve_gdb_update_guest_debug(vcpufd) == -1)
-		return -1;
+	if (uhyve_gdb_update_guest_debug(vcpufd) == -1) return -1;
 
 	return 0;
 }
 
-int uhyve_gdb_enable_ss(int vcpufd)
-{
+int uhyve_gdb_enable_ss(int vcpufd) {
 	stepping = true;
 
-	if (uhyve_gdb_update_guest_debug(vcpufd) == -1)
-		return -1;
+	if (uhyve_gdb_update_guest_debug(vcpufd) == -1) return -1;
 
 	return 0;
 }
 
-int uhyve_gdb_disable_ss(int vcpufd)
-{
+int uhyve_gdb_disable_ss(int vcpufd) {
 	stepping = false;
 
-	if (uhyve_gdb_update_guest_debug(vcpufd) == -1)
-		return -1;
+	if (uhyve_gdb_update_guest_debug(vcpufd) == -1) return -1;
 
 	return 0;
 }
 
 /* Convert a guest virtual address into the correspondign physical address */
-int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt, uint64_t * phys)
-{
+int uhyve_gdb_guest_virt_to_phys(int vcpufd, const uint64_t virt,
+								 uint64_t *phys) {
 #ifdef __aarch64__
 	*phys = aarch64_virt_to_phys(virt);
 #else

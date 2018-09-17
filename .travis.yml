@@ -1,0 +1,16 @@
+# Use new trusty images, should yield newer compilers and packages
+sudo: true
+dist: trusty
+language: generic
+
+os: linux
+env: NAME="clang-format"
+dist: trusty
+addons:
+    apt:
+        sources:
+            - llvm-toolchain-trusty-6.0
+            - ubuntu-toolchain-r-test
+        packages:
+            - clang-format-6.0
+        script: "./.travis/clang-format-checker.sh"

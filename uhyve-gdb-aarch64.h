@@ -26,10 +26,10 @@
 #ifndef UHYVE_GDB_AARCH64_H
 #define UHYVE_GDB_AARCH64_H
 
-#include <stdint.h>
 #include <inttypes.h>
+#include <stdint.h>
 
- struct uhyve_gdb_regs {
+struct uhyve_gdb_regs {
 	uint64_t x[31];
 	uint64_t sp;
 	uint64_t pc;
@@ -43,6 +43,6 @@
 	 * the following: https://github.com/bminor/binutils-gdb/blob/master/gdb/
 	 * features/aarch64-core.xml
 	 */
- } __attribute__ ((__packed__));
+} __attribute__((__packed__));
 
 #endif /* UHYVE_GDB_AARCH64_H */

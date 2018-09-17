@@ -35,9 +35,9 @@
 /* TODO: create an array or equal for more then one netif */
 static uhyve_netinfo_t netinfo;
 
-//-------------------------------------- ATTACH LINUX TAP -----------------------------------------//
-int attach_linux_tap(const char *dev)
-{
+//-------------------------------------- ATTACH LINUX TAP
+//-----------------------------------------//
+int attach_linux_tap(const char *dev) {
 	struct ifreq ifr;
 	int fd, err;
 
@@ -45,8 +45,7 @@ int attach_linux_tap(const char *dev)
 	if (dev[0] == '@') {
 		fd = atoi(&dev[1]);
 
-		if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1)
-			return -1;
+		if (fcntl(fd, F_SETFL, O_NONBLOCK) == -1) return -1;
 		return fd;
 	}
 
@@ -80,8 +79,8 @@ int attach_linux_tap(const char *dev)
 	}
 
 	// If we got back a different device than the one requested, e.g. because
-	// the caller mistakenly passed in '%d' (yes, that's really in the Linux API)
-	// then fail
+	// the caller mistakenly passed in '%d' (yes, that's really in the Linux
+	// API) then fail
 
 	if (strncmp(ifr.ifr_name, dev, IFNAMSIZ) != 0) {
 		close(fd);
@@ -89,14 +88,15 @@ int attach_linux_tap(const char *dev)
 		return -1;
 	}
 
-	// Attempt a zero-sized write to the device. If the device was freshly created
-	// (as opposed to attached to an existing ine) this will fail with EIO. Ignore
-	// any other error return since that may indicate the device is up
+	// Attempt a zero-sized write to the device. If the device was freshly
+	// created (as opposed to attached to an existing ine) this will fail with
+	// EIO. Ignore any other error return since that may indicate the device is
+	// up
 	//
-	// If this check produces a false positive then caller's later writes to fd will
-	// fali with EIO, which is not great but at least we tried
+	// If this check produces a false positive then caller's later writes to fd
+	// will fali with EIO, which is not great but at least we tried
 
-	char buf[1] = { 0 };
+	char buf[1] = {0};
 	if (write(fd, buf, 0) == -1 && errno == EIO) {
 		close(fd);
 		errno = ENODEV;
@@ -106,33 +106,29 @@ int attach_linux_tap(const char *dev)
 	return fd;
 }
 
-//---------------------------------- GET MAC ----------------------------------------------//
-char* uhyve_get_mac(void)
-{
-	return netinfo.mac_str;
-}
+//---------------------------------- GET MAC
+//----------------------------------------------//
+char *uhyve_get_mac(void) { return netinfo.mac_str; }
 
-//---------------------------------- SET MAC ----------------------------------------------//
+//---------------------------------- SET MAC
+//----------------------------------------------//
 
-int uhyve_set_mac(void)
-{
+int uhyve_set_mac(void) {
 	int mac_is_set = 0;
 	uint8_t guest_mac[6];
 
-	char* str = getenv("HERMIT_NETIF_MAC");
-	if (str)
-	{
-		const char *macptr = str;
+	char *str = getenv("HERMIT_NETIF_MAC");
+	if (str) {
+		const char *macptr   = str;
 		const char *v_macptr = macptr;
 		// checking str is a valid MAC address
 		int i = 0;
 		int s = 0;
-		while(*v_macptr) {
-			if(isxdigit(*v_macptr)) {
+		while (*v_macptr) {
+			if (isxdigit(*v_macptr)) {
 				i++;
 			} else if (*v_macptr == ':') {
-				if (i / 2 - 1 != s++)
-					break;
+				if (i / 2 - 1 != s++) break;
 			} else {
 				s = -1;
 			}
@@ -148,29 +144,35 @@ int uhyve_set_mac(void)
 
 	if (!mac_is_set) {
 		int rfd = open("/dev/urandom", O_RDONLY);
-		if(rfd == -1)
-			err(1, "Could not open /dev/urandom\n");
+		if (rfd == -1) err(1, "Could not open /dev/urandom\n");
 		int ret;
 		ret = read(rfd, guest_mac, sizeof(guest_mac));
 		// compare the number of bytes read with the size of guest_mac
 		assert(ret == sizeof(guest_mac));
 		close(rfd);
 
-		guest_mac[0] &= 0xfe;	// creats a random MAC-address in the locally administered
-		guest_mac[0] |= 0x02;	// address range which can be used without conflict with other public devices
+		guest_mac[0] &=
+			0xfe; // creats a random MAC-address in the locally administered
+		guest_mac[0] |= 0x02; // address range which can be used without
+							  // conflict with other public devices
 		// save the MAC address in the netinfo
-		snprintf(netinfo.mac_str, sizeof(netinfo.mac_str),
-			 "%02x:%02x:%02x:%02x:%02x:%02x",
-	                 guest_mac[0], guest_mac[1], guest_mac[2],
-			 guest_mac[3], guest_mac[4], guest_mac[5]);
+		snprintf(netinfo.mac_str,
+				 sizeof(netinfo.mac_str),
+				 "%02x:%02x:%02x:%02x:%02x:%02x",
+				 guest_mac[0],
+				 guest_mac[1],
+				 guest_mac[2],
+				 guest_mac[3],
+				 guest_mac[4],
+				 guest_mac[5]);
 	}
 
 	return 0;
 }
 
-//-------------------------------------- SETUP NETWORK ---------------------------------------------//
-int uhyve_net_init(const char *netif)
-{
+//-------------------------------------- SETUP NETWORK
+//---------------------------------------------//
+int uhyve_net_init(const char *netif) {
 	if (netif == NULL) {
 		err(1, "ERROR: no netif defined\n");
 		return -1;

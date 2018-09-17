@@ -31,42 +31,33 @@
 #ifdef __aarch64__
 #define _GNU_SOURCE
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <err.h>
 #include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <assert.h>
-#include <stdbool.h>
 #include <ctype.h>
 #include <linux/kvm.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <stdbool.h>
+#include <sys/socket.h>
 
-#include "uhyve.h"
-#include "uhyve-gdb.h"
 #include "queue.h"
+#include "uhyve-gdb.h"
+#include "uhyve.h"
 
-void uhyve_gdb_handle_exception(int vcpufd, int sigval)
-{
+void uhyve_gdb_handle_exception(int vcpufd, int sigval) {}
 
-}
+void uhyve_gdb_handle_term(void) {}
 
-void uhyve_gdb_handle_term(void)
-{
-
-}
-
-int uhyve_gdb_init(int vcpufd)
-{
-	return -1;
-}
+int uhyve_gdb_init(int vcpufd) { return -1; }
 
 #endif

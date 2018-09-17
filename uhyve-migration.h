@@ -14,16 +14,16 @@
  *      may be used to endorse or promote products derived from this
  *      software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /**
@@ -37,7 +37,7 @@
 #include <stdbool.h>
 
 extern size_t guest_size;
-extern uint8_t* guest_mem;
+extern uint8_t *guest_mem;
 
 #define MIGRATION_PORT 1337
 #define MAX_PARAM_STR_LEN 128
@@ -50,11 +50,10 @@ typedef enum {
 const static struct {
 	mig_mode_t mig_mode;
 	const char *str;
-} mig_mode_conv [] = {
+} mig_mode_conv[] = {
 	{MIG_MODE_COMPLETE_DUMP, "complete-dump"},
 	{MIG_MODE_INCREMENTAL_DUMP, "incremental-dump"},
 };
-
 
 typedef enum {
 	MIG_TYPE_COLD = 0,
@@ -64,11 +63,10 @@ typedef enum {
 const static struct {
 	mig_type_t mig_type;
 	const char *str;
-} mig_type_conv [] = {
+} mig_type_conv[] = {
 	{MIG_TYPE_COLD, "cold"},
 	{MIG_TYPE_LIVE, "live"},
 };
-
 
 typedef struct _mig_params {
 	mig_type_t type;
@@ -95,7 +93,6 @@ typedef struct _migration_metadata {
 	bool full_checkpoint;
 } migration_metadata_t;
 
-
 mig_params_t mig_params;
 
 void set_migration_params(const char *migration_param_filename);
@@ -110,11 +107,11 @@ void close_migration_channel(void);
 int recv_data(void *buffer, size_t length);
 int send_data(void *buffer, size_t length);
 
-void send_mem_regions(mem_mappings_t guest_physical_memory, mem_mappings_t mem_mappings);
+void send_mem_regions(mem_mappings_t guest_physical_memory,
+					  mem_mappings_t mem_mappings);
 void recv_mem_regions(mem_mappings_t *mem_mappings);
 
 void precopy_phase(mem_mappings_t guest_mem, mem_mappings_t mem_mappings);
 void stop_and_copy_phase(void);
 void recv_guest_mem(mem_mappings_t mem_mappings);
 #endif /* __UHYVE_MIGRATION_H__ */
-
