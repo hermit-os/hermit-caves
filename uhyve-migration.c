@@ -102,12 +102,33 @@ define_migration_param_getter(type)
 define_migration_param_getter(mode)
 
 /**
+ * \brief Enables/disables ODP
+ */
+void
+set_migration_use_odp(const bool use_odp)
+{
+	mig_params.use_odp = use_odp;
+}
+
+
+/**
+ * \brief Enables/disables prefetching for ODP
+ */
+void
+set_migration_prefetch(const bool prefetch)
+{
+	mig_params.prefetch = prefetch;
+}
+
+
+/**
  * \brief prints the migration parameters
  */
 void
 print_migration_params(void)
 {
 	printf("========== MIGRATION PARAMETERS ==========\n");
+	printf("   DEST     : %s\n", inet_ntoa(mig_server.sin_addr));
 	printf("   MODE     : %s\n", get_migration_mode_str(mig_params.mode));
 	printf("   TYPE     : %s\n", get_migration_type_str(mig_params.type));
 	printf("   USE ODP  : %u\n", mig_params.use_odp);

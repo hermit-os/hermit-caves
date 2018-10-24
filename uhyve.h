@@ -30,6 +30,7 @@
 
 #include <err.h>
 #include <linux/kvm.h>
+#include <signal.h>
 
 #define UHYVE_PORT_WRITE		0x400
 #define UHYVE_PORT_OPEN			0x440
@@ -57,8 +58,9 @@
 #define UHYVE_IRQ_NET             (UHYVE_IRQ_BASE+0)
 #define UHYVE_IRQ_MIGRATION       (UHYVE_IRQ_BASE+1)
 
-#define SIGTHRCHKP 	(SIGRTMIN+0)
-#define SIGTHRMIG 	(SIGRTMIN+1)
+#define SIGCHKP 	(SIGRTMIN+0)
+#define SIGTHRCHKP 	(SIGRTMIN+1)
+#define SIGTHRMIG 	(SIGRTMIN+2)
 
 #define kvm_ioctl(fd, cmd, arg) ({ \
         const int ret = ioctl(fd, cmd, arg); \
@@ -110,15 +112,16 @@ typedef struct _migration_metadata migration_metadata_t;
 
 void print_registers(void);
 void timer_handler(int signum);
-void *migration_handler(void *arg);
 void determine_guest_allocations(void);
+void migration_handler(void);
+void *migration_handler_thread(void *arg);
 void restore_cpu_state(vcpu_state_t cpu_state);
 vcpu_state_t read_cpu_state(void);
 vcpu_state_t save_cpu_state(void);
-void write_cpu_state(void);
+void write_cpu_state(const char *path);
 void init_cpu_state(uint64_t elf_entry);
 int load_kernel(uint8_t* mem, char* path);
-int load_checkpoint(uint8_t* mem, char* path);
+int load_checkpoint(FILE *f, const bool last_checkpoint);
 int load_migration_data(uint8_t* mem);
 void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t listen_portno);
 void init_kvm_arch(void);
@@ -128,4 +131,6 @@ void determine_dirty_pages(void (*save_page_handler)(void*, size_t, void*, size_
 void determine_mem_mappings(free_list_t *alloc_list);
 void virt_to_phys(const size_t virtual_address, size_t* const physical_address, size_t* const physical_address_page_end);
 
+
+int uhyve_allocate_vcpus(uint32_t ncores);
 #endif

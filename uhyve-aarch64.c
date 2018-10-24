@@ -265,7 +265,7 @@ void write_cpu_state(void)
 	err(1, "Checkpointing is currently not supported!");
 }
 
-int load_checkpoint(uint8_t* mem, char* path)
+int load_checkpoint(FILE *f, const bool last_checkpoint)
 {
 	err(1, "Checkpointing is currently not supported!");
 }

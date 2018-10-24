@@ -111,6 +111,7 @@
 #include <asm/mman.h>
 
 #include "uhyve.h"
+#include "uhyve-checkpoint.h"
 #include "uhyve-gdb.h"
 #include "uhyve-x86_64.h"
 #include "uhyve-syscalls.h"
@@ -207,9 +208,8 @@ static bool cap_adjust_clock_stable = false;
 static bool cap_irqfd = false;
 static bool cap_vapic = false;
 
-FILE *chk_file = NULL;
-
 extern size_t guest_size;
+extern char* guest_path;
 extern pthread_barrier_t barrier;
 extern pthread_barrier_t migration_barrier;
 extern pthread_t* vcpu_threads;
@@ -635,11 +635,11 @@ vcpu_state_t save_cpu_state(void)
 	return cpu_state;
 }
 
-void write_cpu_state(void)
+void write_cpu_state(const char *chk_path)
 {
 	vcpu_state_t cpu_state = save_cpu_state();
 	char fname[MAX_FNAME];
-	snprintf(fname, MAX_FNAME, "checkpoint/chk%u_core%u.dat", no_checkpoint, cpuid);
+	snprintf(fname, MAX_FNAME, "%s/chk%u_core%u.dat", chk_path, no_checkpoint, cpuid);
 
 	FILE* f = fopen(fname, "w");
 	if (f == NULL) {
@@ -743,14 +743,6 @@ void scan_page_tables(void (*save_page)(void*, size_t, void*, size_t))
 		}
 	}
 }
-void open_chk_file(char *fname)
-{
-	chk_file = fopen(fname, "w");
-	if (chk_file == NULL) {
-		err(1, "fopen: unable to open file");
-	}
-}
-
 
 /* determine guests memory mappings based on its free list
  *
@@ -804,24 +796,6 @@ void determine_mem_mappings(free_list_t *free_list)
 
 }
 
-void close_chk_file(void)
-{
-	fclose(chk_file);
-}
-
-void write_chk_file(void *addr, size_t bytes)
-{
-	if (fwrite(addr, bytes, 1, chk_file) != 1) {
-		err(1, "fwrite failed");
-	}
-}
-
-void write_mem_page_to_chk_file(void *entry, size_t entry_size, void *page, size_t page_size)
-{
-	write_chk_file(entry, entry_size);
-	write_chk_file(page, page_size);
-}
-
 void determine_dirty_pages(void (*save_page_handler)(void*, size_t, void*, size_t))
 {
 #ifdef USE_DIRTY_LOG
@@ -834,95 +808,18 @@ void determine_dirty_pages(void (*save_page_handler)(void*, size_t, void*, size_
 
 void timer_handler(int signum)
 {
-
-	struct stat st = {0};
-	char fname[MAX_FNAME];
-	struct timeval begin, end;
-
-	if (verbose)
-		gettimeofday(&begin, NULL);
-
-	if (stat("checkpoint", &st) == -1)
-		mkdir("checkpoint", 0700);
-
-	for(size_t i = 0; i < ncores; i++)
-		if (vcpu_threads[i] != pthread_self())
-			pthread_kill(vcpu_threads[i], SIGTHRCHKP);
-
-	pthread_barrier_wait(&barrier);
-
-	write_cpu_state();
-
-	snprintf(fname, MAX_FNAME, "checkpoint/chk%u_mem.dat", no_checkpoint);
-
-	open_chk_file(fname);
-
-	/*struct kvm_irqchip irqchip = {};
-	if (cap_irqchip)
-		kvm_ioctl(vmfd, KVM_GET_IRQCHIP, &irqchip);
-	else
-		memset(&irqchip, 0x00, sizeof(irqchip));
-	if (fwrite(&irqchip, sizeof(irqchip), 1, f) != 1)
-		err(1, "fwrite failed");*/
-
-	struct kvm_clock_data clock = {};
-	kvm_ioctl(vmfd, KVM_GET_CLOCK, &clock);
-	write_chk_file(&clock, sizeof(clock));
-
-#if 0
-	if (fwrite(guest_mem, guest_size, 1, f) != 1)
-		err(1, "fwrite failed");
-#else
-	determine_dirty_pages(write_mem_page_to_chk_file);
-#endif
-	close_chk_file();
-	pthread_barrier_wait(&barrier);
-
-	// update configuration file
-	FILE *f = fopen("checkpoint/chk_config.txt", "w");
-	if (f == NULL) {
-		err(1, "fopen: unable to open file");
-	}
-
-	fprintf(f, "number of cores: %u\n", ncores);
-	fprintf(f, "memory size: 0x%zx\n", guest_size);
-	fprintf(f, "checkpoint number: %u\n", no_checkpoint);
-	fprintf(f, "entry point: 0x%zx\n", elf_entry);
-	if (full_checkpoint)
-		fprintf(f, "full checkpoint: 1");
-	else
-		fprintf(f, "full checkpoint: 0");
-
-	fclose(f);
-
-	if (verbose) {
-		gettimeofday(&end, NULL);
-		size_t msec = (end.tv_sec - begin.tv_sec) * 1000;
-		msec += (end.tv_usec - begin.tv_usec) / 1000;
-		fprintf(stderr, "Create checkpoint %u in %zd ms\n", no_checkpoint, msec);
-	}
-
-	no_checkpoint++;
+	create_checkpoint("checkpoint", full_checkpoint);
 }
 
-void *migration_handler(void *arg)
+/** \brief The migration handler
+ *
+ * This is the actual function that implements the migration control flow.
+ * After its execution the process terminates gracefully.
+ */
+void migration_handler(void)
 {
-	sigset_t *signal_mask = (sigset_t *)arg;
 	int res = 0;
 	size_t i = 0;
-	int sig_caught;
-
-	/* wait for a migration request and connect to the migration server*/
-	while (1) {
-		sigwait(signal_mask, &sig_caught);
-
-		if (connect_to_server() < 0) {
-			fprintf(stderr, "[ERROR] Could not connect to the "
-					"destination. Abort!\n");
-		} else {
-			break;
-		}
-	}
 
 	/* send metadata */
 	migration_metadata_t metadata = {
@@ -958,7 +855,8 @@ void *migration_handler(void *arg)
 	assert(vcpu_thread_states == NULL);
 	vcpu_thread_states = (vcpu_state_t*)calloc(ncores, sizeof(vcpu_state_t));
 	for(i = 0; i < ncores; i++)
-		pthread_kill(vcpu_threads[i], SIGTHRMIG);
+		if (vcpu_threads[i] != pthread_self())
+			pthread_kill(vcpu_threads[i], SIGTHRMIG);
 	pthread_barrier_wait(&migration_barrier);
 
 	/* send the final dump */
@@ -987,7 +885,28 @@ void *migration_handler(void *arg)
 
 	/* close socket */
 	close_migration_channel();
+}
 
+
+void *migration_handler_thread(void *arg)
+{
+	sigset_t *signal_mask = (sigset_t *)arg;
+	int sig_caught;
+
+	/* wait for a migration request and connect to the migration server*/
+	while (1) {
+		sigwait(signal_mask, &sig_caught);
+
+		if (connect_to_server() < 0) {
+			fprintf(stderr, "[ERROR] Could not connect to the "
+					"destination. Abort!\n");
+		} else {
+			break;
+		}
+	}
+
+	// call the migration handler and exit
+	migration_handler();
 	exit(EXIT_SUCCESS);
 }
 
@@ -1030,91 +949,71 @@ int load_migration_data(uint8_t* mem)
 	}
 }
 
-int load_checkpoint(uint8_t* mem, char* path)
+int load_checkpoint(FILE *f, const bool last_checkpoint)
 {
-	char fname[MAX_FNAME];
 	size_t location;
 	size_t paddr = elf_entry;
 	int ret;
-	struct timeval begin, end;
-	uint32_t i;
 
-	if (verbose)
-		gettimeofday(&begin, NULL);
-
-	if (!klog)
-		klog = mem+paddr+0x5000-GUEST_OFFSET;
-	if (!mboot)
-		mboot = mem+paddr-GUEST_OFFSET;
+	static bool initialized = false;
+	if (!initialized) {
+		initialized = true;
+		if (!klog)
+			klog = guest_mem+paddr+0x5000-GUEST_OFFSET;
+		if (!mboot)
+			mboot = guest_mem+paddr-GUEST_OFFSET;
 
 
 #ifdef USE_DIRTY_LOG
-	/*
-	 * if we use KVM's dirty page logging, we have to load
-	 * the elf image because most parts are readonly sections
-	 * and aren't able to detect by KVM's dirty page logging
-	 * technique.
-	 */
-	ret = load_kernel(mem, path);
-	if (ret)
-		return ret;
+		/*
+		 * if we use KVM's dirty page logging, we have to load
+		 * the elf image because most parts are readonly sections
+		 * and aren't able to detect by KVM's dirty page logging
+		 * technique.
+		 */
+		ret = load_kernel(guest_mem, guest_path);
+		if (ret)
+			return ret;
 #endif
+	}
 
-	i = full_checkpoint ? no_checkpoint : 0;
-	for(; i<=no_checkpoint; i++)
-	{
-		snprintf(fname, MAX_FNAME, "checkpoint/chk%u_mem.dat", i);
+	/*struct kvm_irqchip irqchip;
+	if (fread(&irqchip, sizeof(irqchip), 1, f) != 1)
+		err(1, "fread failed");
+	if (cap_irqchip && (i == no_checkpoint-1))
+		kvm_ioctl(vmfd, KVM_SET_IRQCHIP, &irqchip);*/
 
-		FILE* f = fopen(fname, "r");
-		if (f == NULL)
-			return -1;
+	struct kvm_clock_data clock;
+	if (fread(&clock, sizeof(clock), 1, f) != 1)
+		err(1, "fread failed");
 
-		/*struct kvm_irqchip irqchip;
-		if (fread(&irqchip, sizeof(irqchip), 1, f) != 1)
-			err(1, "fread failed");
-		if (cap_irqchip && (i == no_checkpoint-1))
-			kvm_ioctl(vmfd, KVM_SET_IRQCHIP, &irqchip);*/
+	// only the last checkpoint has to set the clock
+	if (cap_adjust_clock_stable && last_checkpoint) {
+		struct kvm_clock_data data = {};
 
-		struct kvm_clock_data clock;
-		if (fread(&clock, sizeof(clock), 1, f) != 1)
-			err(1, "fread failed");
-		// only the last checkpoint has to set the clock
-		if (cap_adjust_clock_stable && (i == no_checkpoint)) {
-			struct kvm_clock_data data = {};
-
-			data.clock = clock.clock;
-			kvm_ioctl(vmfd, KVM_SET_CLOCK, &data);
-		}
+		data.clock = clock.clock;
+		kvm_ioctl(vmfd, KVM_SET_CLOCK, &data);
+	}
 
 #if 0
-		if (fread(guest_mem, guest_size, 1, f) != 1)
-			err(1, "fread failed");
+	if (fread(guest_mem, guest_size, 1, f) != 1)
+		err(1, "fread failed");
 #else
 
-		while (fread(&location, sizeof(location), 1, f) == 1) {
-			//printf("location 0x%zx\n", location);
-			size_t *dest_addr = (size_t*) (mem + determine_dest_offset(location));
-			if (location & PG_PSE)
-				ret = fread(dest_addr, (1UL << PAGE_2M_BITS), 1, f);
-			else
-				ret = fread(dest_addr, (1UL << PAGE_BITS), 1, f);
+	while (fread(&location, sizeof(location), 1, f) == 1) {
+		//printf("location 0x%zx\n", location);
+		size_t *dest_addr = (size_t*) (guest_mem + determine_dest_offset(location));
+		if (location & PG_PSE)
+			ret = fread(dest_addr, (1UL << PAGE_2M_BITS), 1, f);
+		else
+			ret = fread(dest_addr, (1UL << PAGE_BITS), 1, f);
 
-			if (ret != 1) {
-				fprintf(stderr, "Unable to read checkpoint: ret = %d", ret);
-				err(1, "fread failed");
-			}
+		if (ret != 1) {
+			fprintf(stderr, "Unable to read checkpoint: ret = %d", ret);
+			err(1, "fread failed");
 		}
+	}
 #endif
-
-		fclose(f);
-	}
-
-	if (verbose) {
-		gettimeofday(&end, NULL);
-		size_t msec = (end.tv_sec - begin.tv_sec) * 1000;
-		msec += (end.tv_usec - begin.tv_usec) / 1000;
-		fprintf(stderr, "Load checkpoint %u in %zd ms\n", no_checkpoint, msec);
-	}
 
 	return 0;
 }

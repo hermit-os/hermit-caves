@@ -9,12 +9,15 @@ option(ENABLE_RDMA_MIGRATION "Migration support via RDMA" OFF)
 
 add_compile_options(-std=c99)
 
-list(APPEND LIBS "-pthread")
+list(APPEND LIBS "-pthread" "-levent" "-levent_pthreads" "-lm")
 set(SRC proxy.c
 	utils.c
 	uhyve.c
+	uhyve-checkpoint.c
 	uhyve-net.c
 	uhyve-migration.c
+	uhyve-monitor.c
+	uhyve-json.c
 	uhyve-x86_64.c
 	uhyve-aarch64.c
 	uhyve-gdb.c
