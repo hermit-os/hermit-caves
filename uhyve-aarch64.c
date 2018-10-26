@@ -280,6 +280,11 @@ void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t liste
 	err(1, "Checkpointing is currently not supported!");
 }
 
+void determine_mem_mappings(alloc_list_t *alloc_list)
+{
+	err(1, "Currently, uhyve does not dermine the memory mappings for aachr64!");
+}
+
 void init_cpu_state(uint64_t elf_entry)
 {
 	struct kvm_vcpu_init vcpu_init = {

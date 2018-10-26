@@ -90,12 +90,13 @@ uint8_t* guest_mem = NULL;
 uint32_t no_checkpoint = 0;
 uint32_t ncores = 1;
 uint64_t elf_entry;
-int kvm = -1, vmfd = -1, netfd = -1, efd = -1;
+int kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
 uint8_t* mboot = NULL;
 __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
 static sem_t net_sem;
+sem_t mig_sem;
 
 int uhyve_argc = -1;
 int uhyve_envc = -1;
@@ -105,6 +106,9 @@ char **uhyve_envp = NULL;
 
 vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t   signal_mask;
+
+mem_mappings_t mem_mappings = {NULL, 0};
+mem_mappings_t guest_physical_memory = {NULL, 0};
 
 typedef struct {
 	int argc;
@@ -252,10 +256,10 @@ static inline void check_network(void)
 
 		efd = eventfd(0, 0);
 		irqfd.fd = efd;
-		irqfd.gsi = UHYVE_IRQ;
+		irqfd.gsi = UHYVE_IRQ_NET;
 		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
 
-		sem_init(&net_sem, 0, 0);
+		sem_init(&net_sem, 1, 0);
 
 		if (pthread_create(&net_thread, NULL, wait_for_packet, NULL))
 			err(1, "unable to create thread");
@@ -271,19 +275,22 @@ static int vcpu_loop(void)
 	if (restart) {
 		vcpu_state_t cpu_state = read_cpu_state();
 		restore_cpu_state(cpu_state);
-	} else if (vcpu_thread_states) {
-		restore_cpu_state(vcpu_thread_states[cpuid]);
-	} else {
-		init_cpu_state(elf_entry);
-	}
 
-	if (cpuid == 0) {
-		if (restart) {
+		/* chkpt no. of the following checkpoint */
+		if (cpuid == 0)
 			no_checkpoint++;
-		} else if (migration) {
+	} else if (vcpu_thread_states) {
+		/* restore VCPU states */
+		restore_cpu_state(vcpu_thread_states[cpuid]);
+
+		/* wait for all VCPUs and cleanup */
+		pthread_barrier_wait(&barrier);
+		if (cpuid == 0) {
 			free(vcpu_thread_states);
 			vcpu_thread_states = NULL;
 		}
+	} else {
+		init_cpu_state(elf_entry);
 	}
 
 	/* init uhyve gdb support */
@@ -437,14 +444,15 @@ static int vcpu_loop(void)
 
 			case UHYVE_PORT_NETWRITE: {
 					uhyve_netwrite_t* uhyve_netwrite = (uhyve_netwrite_t*)(guest_mem + raddr);
-					uhyve_netwrite->ret = 0;
-					ret = write(netfd, guest_mem + (size_t)uhyve_netwrite->data, uhyve_netwrite->len);
-					if (ret >= 0) {
-						uhyve_netwrite->ret = 0;
-						uhyve_netwrite->len = ret;
-					} else {
-						uhyve_netwrite->ret = -1;
+					size_t len=0;
+					while(len < uhyve_netwrite->len) {
+						ret = write(netfd, guest_mem + (size_t)uhyve_netwrite->data + len, uhyve_netwrite->len - len);
+						if (ret > 0)
+							len += ret;
+
 					}
+					uhyve_netwrite->ret = 0;
+					uhyve_netwrite->len = len;
 					break;
 				}
 
@@ -508,6 +516,21 @@ static int vcpu_loop(void)
 					for(i=0; i<uhyve_envc; i++)
 						strcpy(guest_mem + (size_t)env_ptr[i], uhyve_envp[i]);
 
+					break;
+				}
+
+			case UHYVE_PORT_FREELIST: {
+					/* check if we received a valid list */
+					if (raddr == 0) {
+						sem_post(&mig_sem);
+						break;
+					}
+
+					/* this is arch specific */
+					determine_mem_mappings((free_list_t*)(guest_mem+raddr));
+
+					/* wake up main thread */
+					sem_post(&mig_sem);
 					break;
 				}
 
@@ -625,6 +648,29 @@ static void* uhyve_thread(void* arg)
 	pthread_cleanup_pop(1);
 
 	return (void*) ret;
+}
+
+
+/**
+ * \brief Generates the guest's mem_mappings based on its free list
+ */
+void determine_guest_allocations(void)
+{
+	/* request mem_mappings */
+	fprintf(stderr, "[INFO] Requsting guest's free list ...\n");
+	mem_mappings.mem_chunks = NULL;
+	mem_mappings.count = 0;
+	uint64_t event_counter = 1;
+	if (write(mig_efd, &event_counter, sizeof(event_counter)) < 0) {
+		fprintf(stderr, "[ERROR] Could not request the guest's free "
+				"list - %d (%s) - Abort!\n",
+				errno,
+				strerror(errno));
+		return;
+	}
+
+	/* wait for mem_mappings */
+	sem_wait(&mig_sem);
 }
 
 void sigterm_handler(int signum)
@@ -748,7 +794,7 @@ int uhyve_loop(int argc, char **argv)
 {
 	const char* hermit_check = getenv("HERMIT_CHECKPOINT");
 	const char* hermit_mig_support = getenv("HERMIT_MIGRATION_SUPPORT");
-	const char* hermit_mig_type = getenv("HERMIT_MIGRATION_TYPE");
+	const char* hermit_mig_params = getenv("HERMIT_MIGRATION_PARAMS");
 	const char* hermit_debug = getenv("HERMIT_DEBUG");
 	int ts = 0, i = 0;
 
@@ -785,7 +831,7 @@ int uhyve_loop(int argc, char **argv)
 
 	if (hermit_mig_support) {
 		set_migration_target(hermit_mig_support, MIGRATION_PORT);
-		set_migration_type(hermit_mig_type);
+		set_migration_params(hermit_mig_params);
 
 		/* block SIGUSR1 in main thread */
 		sigemptyset (&signal_mask);
@@ -801,6 +847,22 @@ int uhyve_loop(int argc, char **argv)
 		memset(&sa, 0x00, sizeof(sa));
 		sa.sa_handler = &vcpu_thread_mig_handler;
 		sigaction(SIGTHRMIG, &sa, NULL);
+
+		/* install eventfd and semaphore for memory mapping requests */
+		struct kvm_irqfd irqfd = {};
+
+		fprintf(stderr, "[INFO] Creating eventfd for migration "
+				"requests\n");
+		if ((mig_efd = eventfd(0, 0)) < 0) {
+			fprintf(stderr, "[WARNING] Could create the migration "
+					"eventfd - %d (%s).\n",
+					errno,
+					strerror(errno));
+		}
+		irqfd.fd = mig_efd;
+		irqfd.gsi = UHYVE_IRQ_MIGRATION;
+		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
+		sem_init(&mig_sem, 0, 0);
 	}
 
 

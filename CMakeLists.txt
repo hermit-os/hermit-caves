@@ -27,6 +27,7 @@ if(ENABLE_RDMA_MIGRATION)
 	set(SRC ${SRC} uhyve-migration-rdma.c)
 else()
 	remove_definitions(-D__RDMA_MIGRATION__)
+	set(SRC ${SRC} uhyve-migration-tcp.c)
 endif()
 
 check_include_files(asm/msr-index.h HAVE_MSR_INDEX_H)

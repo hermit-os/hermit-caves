@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <infiniband/verbs.h>
+#include <infiniband/verbs_exp.h>
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
@@ -43,7 +44,8 @@
 
 
 #ifdef __RDMA_MIGRATION__
-#define IB_USE_ODP 		(0)
+
+#define MIG_ITERS 		(4)
 
 #define IB_CQ_ENTRIES 		(1)
 #define IB_MAX_INLINE_DATA 	(0)
@@ -137,14 +139,14 @@ void print_send_wr_info(uint64_t id)
  * state ready to be connected with the remote side.
  */
 static void
-init_com_hndl(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+init_com_hndl(mem_mappings_t mem_mappings, bool sender)
 {
 	/* initialize com_hndl */
 	memset(&com_hndl, 0, sizeof(com_hndl));
 
 	/* the guest physical memory is the communication buffer */
 	com_hndl.buf = guest_mem;
-	com_hndl.mr_cnt = mem_chunk_cnt;
+	com_hndl.mr_cnt = mem_mappings.count;
 
 	struct ibv_device **device_list = NULL;
 	int num_devices = 0;
@@ -254,27 +256,31 @@ init_com_hndl(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
 	com_hndl.mrs = (struct ibv_mr**)malloc(sizeof(struct ibv_mr*)*com_hndl.mr_cnt);
 
 	int access_flags = (IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
-	if ((IB_USE_ODP) &&
-	    (com_hndl.dev_attr_ex.odp_caps.general_caps & IBV_ODP_SUPPORT) &&
-	    (com_hndl.dev_attr_ex.odp_caps.per_transport_caps.rc_odp_caps & IBV_ODP_SUPPORT_WRITE)) {
+// 	TODO: check ODP support via capability mask
+//	if ((mig_params.use_odp) &&
+//	    (com_hndl.dev_attr_ex.odp_caps.general_caps & IBV_ODP_SUPPORT) &&
+//	    (com_hndl.dev_attr_ex.odp_caps.per_transport_caps.rc_odp_caps & IBV_ODP_SUPPORT_WRITE)) {
+	if (mig_params.use_odp) {
 		access_flags |= IBV_ACCESS_ON_DEMAND;
 	}
 
 	for (i=0; i<com_hndl.mr_cnt; ++i) {
+		/* register memory region */
 		if ((com_hndl.mrs[i] = ibv_reg_mr(com_hndl.pd,
-						mem_chunks[i].ptr,
-						mem_chunks[i].size,
+						mem_mappings.mem_chunks[i].ptr,
+						mem_mappings.mem_chunks[i].size,
 						access_flags)) == NULL) {
 			fprintf(stderr,
 				"[ERROR] Could not register the memory region #%d (ptr: %llx; size: %llu) "
 				"- %d (%s). Abort!\n",
 				i,
-				mem_chunks[i].ptr,
-				mem_chunks[i].size,
+				mem_mappings.mem_chunks[i].ptr,
+				mem_mappings.mem_chunks[i].size,
 				errno,
 				strerror(errno));
 			exit(EXIT_FAILURE);
 		}
+
 		fprintf(stderr, "[INFO] com_hndl.mrs[%d]->addr = 0x%llx; com_hndl->mrs[%d].length = %llu\n",
 				i,
 				com_hndl.mrs[i]->addr,
@@ -505,6 +511,73 @@ con_com_buf(void) {
 }
 
 /**
+ * \brief Returns the index of the MR enclosing a given mem_chunk
+ */
+static inline ssize_t
+determine_enclosing_mr(void *ptr)
+{
+	size_t i = 0;
+	ssize_t res = -1;
+	for (i=0; i<com_hndl.mr_cnt; ++i) {
+		size_t cur_mr_start = (size_t)com_hndl.mrs[i]->addr;
+		size_t cur_mr_end = cur_mr_start+com_hndl.mrs[i]->length;
+		if ((cur_mr_start <= (size_t)ptr) &&
+		    (cur_mr_end > (size_t)ptr)) {
+			res = i;
+			break;
+		}
+	}
+
+	return res;
+}
+
+
+/**
+ * \brief Prefetches a given list of memory mappings
+ */
+static void
+prefetch_mem_mappings(mem_mappings_t mem_mappings)
+{
+	int i, j, ret;
+	for (i=0; i<mem_mappings.count; ++i) {
+		void *cur_ptr = mem_mappings.mem_chunks[i].ptr;
+		size_t cur_size = mem_mappings.mem_chunks[i].size;
+
+		/* find enclosing MR
+		 * -> assumption: a mapping with always fit within an MR
+		 */
+		ssize_t mr_num = 0;
+		if (determine_enclosing_mr(cur_ptr) < 0) {
+			fprintf(stderr,
+				"[WARNING] Could not determine encloding MR "
+				"for ptr: 0x%llx size: 0x%llx.\n",
+				cur_ptr,
+				cur_size);
+			return;
+		}
+
+		/* prefetch the memory chunk */
+		struct ibv_exp_prefetch_attr prefetch_attr = {
+			.flags 		= IBV_EXP_PREFETCH_WRITE_ACCESS,
+			.addr 		= cur_ptr,
+			.length 	= cur_size,
+			.comp_mask 	= 0,
+		};
+		if ((ret = ibv_exp_prefetch_mr(com_hndl.mrs[mr_num],
+						&prefetch_attr)) < 0) {
+			fprintf(stderr,
+				"[WARNING] Could not prefetch within MR #%d - "
+				"result %d - %d (%s).\n",
+				i,
+				ret,
+				errno,
+				strerror(errno));
+		}
+	}
+}
+
+
+/**
  * \brief Set the destination node for a migration
  *
  * \param ip_str a string containing the IPv4 addr of the destination
@@ -583,6 +656,27 @@ prepare_send_list_elem(void)
 }
 
 /**
+ * \brief Appends an 'ibv_send_wr' to the send_list
+ *
+ * \param send_wr WR to be appended to the send_list
+ */
+static inline void
+append_to_send_list(struct ibv_send_wr *send_wr)
+{
+	if (send_list == NULL) {
+		send_list = send_list_last = send_wr;
+	} else {
+		send_list_last->next = send_wr;
+		send_list_last = send_list_last->next;
+	}
+
+	/* we have to request a CQE if max_send_wr is reached to avoid overflows */
+	if ((++send_list_length%IB_MAX_SEND_WR) == 0) {
+		send_list_last->send_flags 	= IBV_SEND_SIGNALED;
+	}
+}
+
+/**
  * \brief Creates an 'ibv_send_wr' and appends it to the send_list
  *
  * \param addr the page table entry of the memory page
@@ -611,13 +705,33 @@ create_send_list_entry (void *addr, size_t addr_size, void *page, size_t page_si
 
 			send_wr->wr.rdma.rkey 		= com_hndl.rem_qp_info.keys[i];
 
+			/* prefetch MR */
+			if (mig_params.use_odp && mig_params.prefetch) {
+				struct ibv_exp_prefetch_attr prefetch_attr = {
+					.flags 		= IBV_EXP_PREFETCH_WRITE_ACCESS,
+					.addr 		= page,
+					.length 	= page_size,
+					.comp_mask 	= 0,
+				};
+
+				int ret = 0;
+				if ((ret = ibv_exp_prefetch_mr(com_hndl.mrs[i], &prefetch_attr)) < 0) {
+					fprintf(stderr,
+						"[WARNING] Could not prefetch within MR #%d - result %d "
+						"- %d (%s).\n",
+						i,
+						ret,
+						errno,
+						strerror(errno));
+				}
+			}
 			break;
 		}
 	}
 
 	/* did we find the correct memory region? */
 	if (i == com_hndl.mr_cnt) {
-		fprintf(stderr, "[ERROR] Could not find a valid MR for address 0x%llx!\n", page);
+		fprintf(stderr, "[ERROR] Could not find a valid MR for address 0x%llx! (send_list_length = %llu)\n", page, send_list_length);
 		return;
 	}
 
@@ -629,18 +743,82 @@ create_send_list_entry (void *addr, size_t addr_size, void *page, size_t page_si
 	}
 
 	/* apped work request to send list */
-	if (send_list == NULL) {
-		send_list = send_list_last = send_wr;
-	} else {
-		send_list_last->next = send_wr;
-		send_list_last = send_list_last->next;
-	}
-	/* we have to request a CQE if max_send_wr is reached to avoid overflows */
-	if ((++send_list_length%com_hndl.dev_attr_ex.orig_attr.max_qp_wr) == 0) {
-		send_list_last->send_flags 	= IBV_SEND_SIGNALED;
-	}
+	append_to_send_list(send_wr);
 }
 
+/**
+ * \brief Frees the send list
+ */
+static inline
+void cleanup_send_list(void)
+{
+	struct ibv_send_wr *cur_send_wr = send_list;
+	struct ibv_send_wr *tmp_send_wr = NULL;
+	while (cur_send_wr != NULL) {
+		free(cur_send_wr->sg_list);
+		tmp_send_wr = cur_send_wr;
+		cur_send_wr = cur_send_wr->next;
+		free(tmp_send_wr);
+	}
+	send_list_length = 0;
+}
+
+/*
+ * \brief Processes the send list by passing the send_wrs to the HCA
+ */
+static inline
+void process_send_list(void)
+{
+	/* we have to call ibv_post_send() as long as 'send_list' contains elements  */
+	struct ibv_wc wc;
+	struct ibv_send_wr *remaining_send_wr = NULL;
+	do {
+		/* send data */
+		remaining_send_wr = NULL;
+		if (ibv_post_send(com_hndl.qp, send_list, &remaining_send_wr) && (errno != ENOMEM)) {
+			fprintf(stderr,
+				"[ERROR] Could not post send - %d (%s). Abort!\n",
+				errno,
+				strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+
+		/* wait for send WRs if CQ is full */
+		int res = 0;
+		do {
+			if ((res = ibv_poll_cq(com_hndl.cq, 1, &wc)) < 0) {
+				fprintf(stderr,
+					"[ERROR] Could not poll on CQ - %d (%s). Abort!\n",
+					errno,
+					strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+		} while (res < 1);
+		if (wc.status != IBV_WC_SUCCESS) {
+			fprintf(stderr,
+			    "[ERROR] WR failed status %s (%d) for wr_id %llu\n",
+			    ibv_wc_status_str(wc.status),
+			    wc.status,
+			    wc.wr_id);
+
+			print_send_wr_info(wc.wr_id);
+		}
+		send_list = remaining_send_wr;
+	} while (remaining_send_wr);
+
+
+	/* ensure that we receive the CQE for the last page */
+	if (wc.wr_id != IB_WR_WRITE_LAST_PAGE_ID) {
+		fprintf(stderr,
+		    "[ERROR] WR failed status %s (%d) for wr_id %d\n",
+		    ibv_wc_status_str(wc.status),
+		    wc.status,
+		    (int)wc.wr_id);
+	}
+
+	/* free send list */
+	cleanup_send_list();
+}
 
 /**
  * \brief Prepares a send_list containing all memory defined by com_hndl.mrs
@@ -677,120 +855,124 @@ void enqueue_all_mrs(void)
 	}
 }
 
+/**
+ * \brief A simple termination criterion for the live-migration
+ */
+static inline
+bool termination_criterion(void)
+{
+	/* use a simple counter */
+	static uint32_t mig_round = 0;
+
+	return (mig_round++ == MIG_ITERS)? true : false;
+}
+
 
 /**
- * \brief Sends the guest memory to the destination
+ * \brief The pre-copy phase of the live-migration
  *
- * \param mode MIG_MODE_COMPLETE_DUMP sends the complete memory and
- *             MIG_MODE_INCREMENTAL_DUMP only the mapped guest pages
+ * \param guest_mem the guest physical memory
+ * \param mem_mappings the mapped memory regions
+ *
+ * This function initializes the IB connection and executes the precopy
+ * iteration steps.
  */
-void send_guest_mem(mig_mode_t mode, bool final_dump, size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+void precopy_phase(mem_mappings_t guest_mem, mem_mappings_t mem_mappings)
+{
+	/* the live migration needs the whole guest memory to be registered */
+	if ((mig_params.type == MIG_TYPE_LIVE) || (mem_mappings.count == 0)) {
+		init_com_hndl(guest_mem, true);
+	} else {
+		init_com_hndl(mem_mappings, true);
+	}
+
+	/* prefetch allocated regions if ODP is used */
+	if (mig_params.use_odp && mig_params.prefetch) {
+		prefetch_mem_mappings(mem_mappings);
+
+		/* disable prefetching for cold/complete migration */
+		if ((mig_params.mode == MIG_MODE_COMPLETE_DUMP) ||
+			(mig_params.type == MIG_TYPE_COLD)) {
+				mig_params.prefetch = false;
+			}
+	}
+
+	/* establish the IB connection */
+	exchange_qp_info(false);
+	con_com_buf();
+
+	/* perform pre-copy iterations */
+	while (!(mig_params.type == MIG_TYPE_COLD) && !termination_criterion()) {
+		/* iterate guest page tables
+		 * -> ignore migration mode
+		 * -> enforce INCREMENTAL dumps
+		 */
+		determine_dirty_pages(create_send_list_entry);
+
+		/* is there anything to send? */
+		if (send_list_length != 0) {
+			/* we want a CQE for the last WR */
+			send_list_last->wr_id 		= IB_WR_WRITE_LAST_PAGE_ID;
+			send_list_last->send_flags 	= IBV_SEND_SIGNALED;
+
+			process_send_list();
+		} else {
+			break;
+		}
+
+	}
+
+	return;
+}
+
+
+/**
+ * \brief The stop-and-copy phase of the live-migration
+ *
+ * This function performs the last step of the migration. After freezing the
+ * VCPUs the guest-physical memory is transferred (another time) to the
+ * destination.
+ */
+void stop_and_copy_phase(void)
 {
 	int res = 0, i = 0;
 	static bool ib_initialized = false;
 
-	/* prepare IB channel */
-	if (!ib_initialized) {
-		init_com_hndl(mem_chunk_cnt, mem_chunks);
-		exchange_qp_info(false);
-		con_com_buf();
-
-		ib_initialized = true;
-	}
 
 	/* determine migration mode */
-	switch (mode) {
-	case MIG_MODE_COMPLETE_DUMP:
-		enqueue_all_mrs();
-		break;
-	case MIG_MODE_INCREMENTAL_DUMP:
-		/* iterate guest page tables */
+	if (mig_params.type == MIG_TYPE_COLD) {
+		switch (mig_params.mode) {
+		case MIG_MODE_COMPLETE_DUMP:
+			enqueue_all_mrs();
+			break;
+		case MIG_MODE_INCREMENTAL_DUMP:
+			/* iterate guest page tables */
+			determine_dirty_pages(create_send_list_entry);
+			break;
+		default:
+			fprintf(stderr, "[ERROR] Unknown migration mode. Abort!\n");
+			exit(EXIT_FAILURE);
+		}
+	} else if (mig_params.type == MIG_TYPE_LIVE) {
 		determine_dirty_pages(create_send_list_entry);
-		break;
-	default:
-		fprintf(stderr, "[ERROR] Unknown migration mode. Abort!\n");
+	} else {
+		fprintf(stderr, "[ERROR] Unknown migration type. Abort!\n");
 		exit(EXIT_FAILURE);
 	}
 
-	/* create a dumy WR request if there is nothing to send */
-	if (send_list_length == 0)
-		create_send_list_entry(NULL, 0, NULL, 0);
+	/* create a dumy WR request if there is nothing to be sent */
+	if (send_list_length == 0) {
+		struct ibv_send_wr *send_wr =  prepare_send_list_elem();
+		append_to_send_list(send_wr);
+	}
 
 	/* we have to wait for the last WR before informing dest */
-	if ((mode == MIG_MODE_COMPLETE_DUMP) || final_dump) {
-		send_list_last->wr_id 		= IB_WR_WRITE_LAST_PAGE_ID;
-		send_list_last->opcode 		= IBV_WR_RDMA_WRITE_WITH_IMM;
-		send_list_last->send_flags 	= IBV_SEND_SIGNALED | IBV_SEND_SOLICITED;
-		send_list_last->imm_data 	= htonl(0x1);
-	} else {
-		send_list_last->wr_id 		= IB_WR_WRITE_LAST_PAGE_ID;
-		send_list_last->send_flags 	= IBV_SEND_SIGNALED;
-	}
+	send_list_last->wr_id 		= IB_WR_WRITE_LAST_PAGE_ID;
+	send_list_last->opcode 		= IBV_WR_RDMA_WRITE_WITH_IMM;
+	send_list_last->send_flags 	= IBV_SEND_SIGNALED | IBV_SEND_SOLICITED;
+	send_list_last->imm_data 	= htonl(0x1);
 
-	printf("DEBUG: Send list length %d\n", send_list_length);
-
-	/* we have to call ibv_post_send() as long as 'send_list' contains elements  */
- 	struct ibv_wc wc;
-	struct ibv_send_wr *remaining_send_wr = NULL;
-	do {
-		/* send data */
-		remaining_send_wr = NULL;
-		if (ibv_post_send(com_hndl.qp, send_list, &remaining_send_wr) && (errno != ENOMEM)) {
-			fprintf(stderr,
-				"[ERROR] Could not post send"
-				"- %d (%s). Abort!\n",
-				errno,
-				strerror(errno));
-			exit(EXIT_FAILURE);
-		}
-
-		/* wait for send WRs if CQ is full */
-		do {
-			if ((res = ibv_poll_cq(com_hndl.cq, 1, &wc)) < 0) {
-				fprintf(stderr,
-					"[ERROR] Could not poll on CQ"
-					"- %d (%s). Abort!\n",
-					errno,
-					strerror(errno));
-				exit(EXIT_FAILURE);
-			}
-		} while (res < 1);
-		if (wc.status != IBV_WC_SUCCESS) {
-			fprintf(stderr,
-			    "[ERROR] WR failed status %s (%d) for wr_id %llu\n",
-			    ibv_wc_status_str(wc.status),
-			    wc.status,
-			    wc.wr_id);
-
-			print_send_wr_info(wc.wr_id);
-		}
-		send_list = remaining_send_wr;
-	} while (remaining_send_wr);
-
-
-	/* ensure that we receive the CQE for the last page */
-	if (wc.wr_id != IB_WR_WRITE_LAST_PAGE_ID) {
-		fprintf(stderr,
-		    "[ERROR] WR failed status %s (%d) for wr_id %d\n",
-		    ibv_wc_status_str(wc.status),
-		    wc.status,
-		    (int)wc.wr_id);
-	}
-
-	/* cleanup send_list */
-	struct ibv_send_wr *cur_send_wr = send_list;
-	struct ibv_send_wr *tmp_send_wr = NULL;
-	while (cur_send_wr != NULL) {
-		free(cur_send_wr->sg_list);
-		tmp_send_wr = cur_send_wr;
-		cur_send_wr = cur_send_wr->next;
-		free(tmp_send_wr);
-	}
-	send_list_length = 0;
-
-	/* do not close the channel in a pre-dump */
-	if (!final_dump)
-		return;
+	process_send_list();
 
 	/* free IB-related resources */
 	destroy_com_hndl();
@@ -806,13 +988,15 @@ void send_guest_mem(mig_mode_t mode, bool final_dump, size_t mem_chunk_cnt, mem_
  *
  * The receive participates in the IB connection setup and waits for the
  * 'solicited' event sent with the last WR issued by the sender.
+ *
+ * \param mem_mappings the memory regions regions that have to be mapped
  */
-void recv_guest_mem(size_t mem_chunk_cnt, mem_chunk_t *mem_chunks)
+void recv_guest_mem(mem_mappings_t mem_mappings)
 {
 	int res = 0;
 
 	/* prepare IB channel */
-	init_com_hndl(mem_chunk_cnt, mem_chunks);
+	init_com_hndl(mem_mappings, false);
 	exchange_qp_info(true);
 	con_com_buf();
 
