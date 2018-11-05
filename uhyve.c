@@ -709,7 +709,7 @@ uhyve_init(char *path)
 	atexit(uhyve_atexit);
 
 	const char *start_mig_server = getenv("HERMIT_MIGRATION_SERVER");
-	const char *start_uhyve_monitor = getenv("HERMIT_MONITOR");
+	const char *start_uhyve_monitor = getenv("UHYVE_MONITOR");
 
 	/*
 	 * Three startups
