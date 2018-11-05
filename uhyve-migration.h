@@ -99,6 +99,10 @@ typedef struct _migration_metadata {
 mig_params_t mig_params;
 
 void set_migration_params(const char *migration_param_filename);
+void set_migration_mode(const char *);
+void set_migration_type(const char *);
+void set_migration_use_odp(const bool);
+void set_migration_prefetch(const bool);
 
 mig_type_t get_migration_type(void);
 

@@ -64,8 +64,10 @@
 #include <linux/kvm.h>
 
 #include "uhyve.h"
+#include "uhyve-checkpoint.h"
 #include "uhyve-syscalls.h"
 #include "uhyve-migration.h"
+#include "uhyve-monitor.h"
 #include "uhyve-net.h"
 #include "uhyve-gdb.h"
 #include "proxy.h"
@@ -78,7 +80,7 @@ static pthread_mutex_t kvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 extern bool verbose;
 
-static char* guest_path = NULL;
+char* guest_path = NULL;
 static bool uhyve_gdb_enabled = false;
 size_t guest_size = 0x20000000ULL;
 bool full_checkpoint = false;
@@ -96,6 +98,7 @@ __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
 static sem_t net_sem;
+sem_t monitor_sem;
 sem_t mig_sem;
 
 int uhyve_argc = -1;
@@ -175,6 +178,8 @@ static void close_fd(int* fd)
 static void uhyve_exit(void* arg)
 {
 	//print_registers();
+
+	uhyve_monitor_destroy();
 
 	if (pthread_mutex_trylock(&kvm_lock))
 	{
@@ -592,14 +597,6 @@ static int vcpu_init(void)
 	return 0;
 }
 
-static void sigusr_handler(int signum)
-{
-	pthread_barrier_wait(&barrier);
-	write_cpu_state();
-
-	pthread_barrier_wait(&barrier);
-}
-
 static void vcpu_thread_mig_handler(int signum)
 {
 	/* memory should be allocated at this point */
@@ -629,7 +626,7 @@ static void* uhyve_thread(void* arg)
 
 	/* install signal handler for checkpoint */
 	memset(&sa, 0x00, sizeof(sa));
-	sa.sa_handler = &sigusr_handler;
+	sa.sa_handler = &vcpu_thread_chk_handler;
 	sigaction(SIGTHRCHKP, &sa, NULL);
 
 	/* install signal handler for migration */
@@ -678,9 +675,32 @@ void sigterm_handler(int signum)
 	pthread_exit(0);
 }
 
-int uhyve_init(char *path)
+
+// TODO: support dynamic adaptations during runtime
+int
+uhyve_allocate_vcpus(uint32_t ncores)
 {
-	FILE *f = NULL;
+	if (vcpu_threads)
+		free(vcpu_threads);
+
+	vcpu_threads = (pthread_t *)calloc(ncores, sizeof(pthread_t));
+	if (!vcpu_threads)
+		return -1;
+
+	if (vcpu_fds)
+		free(vcpu_fds);
+
+	vcpu_fds = (int *)calloc(ncores, sizeof(int));
+	if (!vcpu_fds)
+		return -1;
+
+	return 0;
+}
+
+int
+uhyve_init(char *path)
+{
+	FILE *f    = NULL;
 	guest_path = path;
 
 	signal(SIGTERM, sigterm_handler);
@@ -689,6 +709,7 @@ int uhyve_init(char *path)
 	atexit(uhyve_atexit);
 
 	const char *start_mig_server = getenv("HERMIT_MIGRATION_SERVER");
+	const char *start_uhyve_monitor = getenv("UHYVE_MONITOR");
 
 	/*
 	 * Three startups
@@ -696,7 +717,13 @@ int uhyve_init(char *path)
 	 * b) load existing checkpoint
 	 * c) normal run
 	 */
- 	if (start_mig_server) {
+	if (start_uhyve_monitor) {
+		// initialize the semaphore
+		sem_init(&monitor_sem, 0, 0);
+
+		// create the monitor thread
+		uhyve_monitor_init();
+	} else if (start_mig_server) {
 		migration = true;
 		migration_metadata_t metadata;
 		wait_for_incomming_migration(&metadata, MIGRATION_PORT);
@@ -705,23 +732,15 @@ int uhyve_init(char *path)
 		guest_size = metadata.guest_size;
 		elf_entry = metadata.elf_entry;
 		full_checkpoint = metadata.full_checkpoint;
-	} else if ((f = fopen("checkpoint/chk_config.txt", "r")) != NULL) {
-		int tmp = 0;
+	} else if (load_checkpoint_config("checkpoint") == 0) {
 		restart = true;
-
-		fscanf(f, "number of cores: %u\n", &ncores);
-		fscanf(f, "memory size: 0x%zx\n", &guest_size);
-		fscanf(f, "checkpoint number: %u\n", &no_checkpoint);
-		fscanf(f, "entry point: 0x%zx", &elf_entry);
-		fscanf(f, "full checkpoint: %d", &tmp);
-		full_checkpoint = tmp ? true : false;
 
 		if (verbose)
 			fprintf(stderr,
-				"Restart from checkpoint %u "
+				"Restart '%s' from checkpoint %u "
 				"(ncores %d, mem size 0x%zx)\n",
+				guest_path,
 				no_checkpoint, ncores, guest_size);
-		fclose(f);
 	} else {
 		const char* hermit_memory = getenv("HERMIT_MEM");
 		if (hermit_memory)
@@ -736,13 +755,10 @@ int uhyve_init(char *path)
 			full_checkpoint = true;
 	}
 
-	vcpu_threads = (pthread_t*) calloc(ncores, sizeof(pthread_t));
-	if (!vcpu_threads)
-		err(1, "Not enough memory");
-
-	vcpu_fds = (int*) calloc(ncores, sizeof(int));
-	if (!vcpu_fds)
-		err(1, "Not enough memory");
+	if (uhyve_allocate_vcpus(ncores) < 0) {
+		fprintf(stderr, "[ERROR] Could not allocate memory for VCPU data structures. Abort!");
+		exit(EXIT_FAILURE);
+	}
 
 	kvm = open("/dev/kvm", O_RDWR | O_CLOEXEC);
 	if (kvm < 0)
@@ -757,13 +773,20 @@ int uhyve_init(char *path)
 	vmfd = kvm_ioctl(kvm, KVM_CREATE_VM, 0);
 
 #ifdef __x86_64__
-	init_kvm_arch();
+	// the monitor takes care of initializing kvm
+	if (!start_uhyve_monitor || (path != NULL))
+		init_kvm_arch();
+
+	// TODO: revise start-up logic
 	if (restart) {
-		if (load_checkpoint(guest_mem, path) != 0)
+		if (restore_checkpoint("checkpoint") != 0)
 			exit(EXIT_FAILURE);
 	} else if (start_mig_server) {
 		load_migration_data(guest_mem);
 		close_migration_channel();
+	} else if (start_uhyve_monitor && (path == 0)) {
+		// wait for uhyve-monitor command
+		sem_wait(&monitor_sem);
 	} else {
 		if (load_kernel(guest_mem, path) != 0)
 			exit(EXIT_FAILURE);
@@ -840,31 +863,33 @@ int uhyve_loop(int argc, char **argv)
 
 		/* start migration thread; handles SIGUSR1 */
 		pthread_t sig_thr_id;
-		pthread_create (&sig_thr_id, NULL, migration_handler,  (void *)&signal_mask);
-
-		/* install signal handler for migration */
-		struct sigaction sa;
-		memset(&sa, 0x00, sizeof(sa));
-		sa.sa_handler = &vcpu_thread_mig_handler;
-		sigaction(SIGTHRMIG, &sa, NULL);
-
-		/* install eventfd and semaphore for memory mapping requests */
-		struct kvm_irqfd irqfd = {};
-
-		fprintf(stderr, "[INFO] Creating eventfd for migration "
-				"requests\n");
-		if ((mig_efd = eventfd(0, 0)) < 0) {
-			fprintf(stderr, "[WARNING] Could create the migration "
-					"eventfd - %d (%s).\n",
-					errno,
-					strerror(errno));
-		}
-		irqfd.fd = mig_efd;
-		irqfd.gsi = UHYVE_IRQ_MIGRATION;
-		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
-		sem_init(&mig_sem, 0, 0);
+		pthread_create (&sig_thr_id, NULL, migration_handler_thread,  (void *)&signal_mask);
 	}
 
+	// TODO: refactor the following code
+	//       this is used for old interface (ENV variables)
+	//       and the uhyve-monitork
+	/* install signal handler for migration */
+	struct sigaction sa;
+	memset(&sa, 0x00, sizeof(sa));
+	sa.sa_handler = &vcpu_thread_mig_handler;
+	sigaction(SIGTHRMIG, &sa, NULL);
+
+	// install eventfd and semaphore for memory mapping requests
+	struct kvm_irqfd irqfd = {};
+
+	fprintf(stderr, "[INFO] Creating eventfd for migration "
+			"requests\n");
+	if ((mig_efd = eventfd(0, 0)) < 0) {
+		fprintf(stderr, "[WARNING] Could create the migration "
+				"eventfd - %d (%s).\n",
+				errno,
+				strerror(errno));
+	}
+	irqfd.fd = mig_efd;
+	irqfd.gsi = UHYVE_IRQ_MIGRATION;
+	kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
+	sem_init(&mig_sem, 0, 0);
 
 	// First CPU is special because it will boot the system. Other CPUs will
 	// be booted linearily after the first one.
