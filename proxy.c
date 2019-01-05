@@ -378,13 +378,13 @@ static int qemu_init(char *path)
 		qemu_argv[i+1] = "accel=kvm";
 		qemu_argv[i+2] = "-cpu";
 		qemu_argv[i+3] = "host";
-	} /*else {
+	} else {
 		for(; qemu_argv[i] != NULL; i++)
 			;
 
 		qemu_argv[i] = "-cpu";
-		qemu_argv[i+1] = "SandyBridge";
-	}*/
+		qemu_argv[i+1] = "Haswell-noTSX";
+	}
 
 	str = getenv("HERMIT_MONITOR");
 	if (str && (strcmp(str, "0") != 0))
