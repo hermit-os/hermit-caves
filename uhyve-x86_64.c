@@ -222,7 +222,7 @@ extern uint32_t ncores;
 extern uint8_t* guest_mem;
 extern size_t guest_size;
 extern int kvm, vmfd, netfd, efd, mig_efd;
-extern uint8_t* mboot;
+extern volatile kernel_header_t* kheader;
 extern __thread struct kvm_run *run;
 extern __thread int vcpufd;
 extern __thread uint32_t cpuid;
@@ -368,6 +368,7 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
 	memset(pde, 0x00, 4096);
 
 	*pml4 = BOOT_PDPTE | (X86_PDPT_P | X86_PDPT_RW);
+	pml4[511] = BOOT_PML4 | (X86_PDPT_P | X86_PDPT_RW);
 	*pdpte = BOOT_PDE | (X86_PDPT_P | X86_PDPT_RW);
 	for (paddr = 0; paddr < 0x20000000ULL; paddr += GUEST_PAGE_SIZE, pde++)
 		*pde = paddr | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
@@ -468,10 +469,10 @@ static void convert_to_host_virt(mem_mappings_t *mem_mappings)
 {
 	size_t i = 0;
 	/* convert guest-physical addrees to host-virtual */
-	fprintf(stderr, "[INFO] We have %u memory chunks\n", mem_mappings->count);
+	fprintf(stderr, "[INFO] We have %lu memory chunks\n", mem_mappings->count);
 	fprintf(stderr, "[INFO] ");
 	for (i=0; i<mem_mappings->count; ++i) {
-		fprintf(stderr, "(ADDR[%lu]: 0x%llx, SIZE[%lu]: 0x%llx); ",
+		fprintf(stderr, "(ADDR[%lu]: %p, SIZE[%lu]: 0x%zx); ",
 				i,
 				mem_mappings->mem_chunks[i].ptr,
 				i,
@@ -553,9 +554,9 @@ void init_cpu_state(uint64_t elf_entry)
 
 	// only one core is able to enter startup code
 	// => the wait for the predecessor core
-	while (*((volatile uint32_t*) (mboot + 0x20)) < cpuid)
+	while (kheader->cpu_online < cpuid)
 		pthread_yield();
-	*((volatile uint32_t*) (mboot + 0x30)) = cpuid;
+	kheader->current_boot_id = cpuid;
 
 	/* Setup registers and memory. */
 	setup_system(vcpufd, guest_mem, cpuid);
@@ -705,7 +706,7 @@ void scan_page_tables(void (*save_page)(void*, size_t, void*, size_t))
 {
 	const size_t flag = (!full_checkpoint && (no_checkpoint > 0)) ? PG_DIRTY : PG_ACCESSED;
 
-	size_t* pml4 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
+	size_t* pml4 = (size_t*) (guest_mem+BOOT_PML4);
 	for(size_t i=0; i<(1 << PAGE_MAP_BITS); i++) {
 		if ((pml4[i] & PG_PRESENT) != PG_PRESENT)
 			continue;
@@ -997,8 +998,8 @@ int load_migration_data(uint8_t* mem)
 	int res = 0;
 	if (!klog)
 		klog = mem+paddr+0x5000-GUEST_OFFSET;
-	if (!mboot)
-		mboot = mem+paddr-GUEST_OFFSET;
+	if (!kheader)
+		kheader = (volatile kernel_header_t*) (mem+paddr-GUEST_OFFSET);
 
 
 	/* get memory chunk info from source and convert to host-virt */
@@ -1044,8 +1045,8 @@ int load_checkpoint(uint8_t* mem, char* path)
 
 	if (!klog)
 		klog = mem+paddr+0x5000-GUEST_OFFSET;
-	if (!mboot)
-		mboot = mem+paddr-GUEST_OFFSET;
+	if (!kheader)
+		kheader = (volatile kernel_header_t*) (mem+paddr-GUEST_OFFSET);
 
 
 #ifdef USE_DIRTY_LOG
@@ -1180,7 +1181,7 @@ void init_kvm_arch(void)
 	if (!(hugepage && (strcmp(hugepage, "0") == 0))) {
 		madvise(guest_mem, guest_size, MADV_HUGEPAGE);
 		if (verbose)
-			fprintf(stderr, "Uhyvde uses huge pages to improve the performance.\n");
+			fprintf(stderr, "Uhyve uses huge pages to improve the performance.\n");
 	}
 
 	struct kvm_userspace_memory_region kvm_region = {
@@ -1319,32 +1320,35 @@ int load_kernel(uint8_t* mem, char* path)
 			goto out;
 		if (!klog)
 			klog = mem+paddr+0x5000-GUEST_OFFSET;
-		if (!mboot)
-			mboot = mem+paddr-GUEST_OFFSET;
+		if (!kheader)
+			kheader = (volatile kernel_header_t*) (mem+paddr-GUEST_OFFSET);
 
 		if (!pstart) {
 			pstart = paddr;
 
 			// initialize kernel
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x08)) = paddr; // physical start address
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x10)) = guest_size;   // physical limit
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x18)) = get_cpufreq();
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x24)) = 1; // number of used cpus
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x30)) = 0; // apicid
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x60)) = 1; // numa nodes
-			*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x94)) = 1; // announce uhyve
+			//fprintf(stderr, "Magic number: 0x%x, version %d\n",
+			//	kheader->magic_number, kheader->version);
+
+			kheader->current_stack_address = paddr+sizeof(kernel_header_t);
+			kheader->base = paddr; // physical start address
+			kheader->limit = guest_size;   // physical limit
+			kheader->cpu_freq = get_cpufreq();
+			kheader->possible_cpus = 1; // number of used cpus
+			kheader->current_boot_id = 0; // apicid
+			kheader->uhyve = 1; // announce uhyve
 			if (verbose)
-				*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0x98)) = UHYVE_UART_PORT	; // announce uhyve
+				kheader->uartport = UHYVE_UART_PORT; // announce uhyve
 
 			char* str = getenv("HERMIT_IP");
 			if (str) {
 				uint32_t ip[4];
 
 				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB0)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB1)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB2)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB3)) = (uint8_t) ip[3];
+				kheader->hcip[0] = (uint8_t) ip[0];
+				kheader->hcip[1] = (uint8_t) ip[1];
+				kheader->hcip[2] = (uint8_t) ip[2];
+				kheader->hcip[3] = (uint8_t) ip[3];
 			}
 
 			str = getenv("HERMIT_GATEWAY");
@@ -1352,30 +1356,30 @@ int load_kernel(uint8_t* mem, char* path)
 				uint32_t ip[4];
 
 				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB4)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB5)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB6)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB7)) = (uint8_t) ip[3];
+				kheader->hcgateway[0] = (uint8_t) ip[0];
+				kheader->hcgateway[1] = (uint8_t) ip[1];
+				kheader->hcgateway[2] = (uint8_t) ip[2];
+				kheader->hcgateway[3] = (uint8_t) ip[3];
 			}
 			str = getenv("HERMIT_MASK");
 			if (str) {
 				uint32_t ip[4];
 
 				sscanf(str, "%u.%u.%u.%u",	ip+0, ip+1, ip+2, ip+3);
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB8)) = (uint8_t) ip[0];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xB9)) = (uint8_t) ip[1];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xBA)) = (uint8_t) ip[2];
-				*((uint8_t*) (mem+paddr-GUEST_OFFSET + 0xBB)) = (uint8_t) ip[3];
+				kheader->hcmask[0] = (uint8_t) ip[0];
+				kheader->hcmask[1] = (uint8_t) ip[1];
+				kheader->hcmask[2] = (uint8_t) ip[2];
+				kheader->hcmask[3] = (uint8_t) ip[3];
 			}
 
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xbc)) = (uint64_t)guest_mem;
+			kheader->host_logical_addr = (uint64_t)guest_mem;
 
 			// Pass the boot time in microseconds (boot_gtod) to HermitCore-rs.
 			struct timeval tv;
 			gettimeofday(&tv, NULL);
-			*((uint64_t*) (mem+paddr-GUEST_OFFSET + 0xd4)) = (uint64_t)tv.tv_sec * 1000000;
+			kheader->boot_gtod = (uint64_t)tv.tv_sec * 1000000;
 		}
-		*((uint64_t*) (mem+pstart-GUEST_OFFSET + 0x38)) = paddr + memsz - pstart; // total kernel size
+		kheader->image_size = paddr + memsz - pstart; // total kernel size
 	}
 
 	ret = 0;
@@ -1427,7 +1431,7 @@ void virt_to_phys(
 	size_t* const physical_address_page_end
 )
 {
-	size_t* const pml4 = (size_t*) (guest_mem+elf_entry+PAGE_SIZE);
+	size_t* const pml4 = (size_t*) (guest_mem+BOOT_PML4);
 
 	*physical_address = 0;
 	*physical_address_page_end = 0;

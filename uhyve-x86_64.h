@@ -95,4 +95,30 @@
         seg.avl = GDT_GET_AVL(gdt_ent);         \
     } while (0)
 
+typedef struct kernel_header {
+	uint32_t magic_number;
+	uint32_t version;
+	uint64_t base;
+	uint64_t limit;
+	uint64_t image_size;
+	uint64_t current_stack_address;
+	uint64_t current_percore_address;
+	uint64_t host_logical_addr;
+	uint64_t boot_gtod;
+	uint64_t mb_info;
+	uint64_t cmdline;
+	uint64_t cmdsize;
+	uint32_t cpu_freq;
+	uint32_t boot_processor;
+	uint32_t cpu_online;
+	uint32_t possible_cpus;
+	uint32_t current_boot_id;
+	uint16_t uartport;
+	uint8_t single_kernel;
+	uint8_t uhyve;
+	uint8_t hcip[4];
+	uint8_t hcgateway[4];
+	uint8_t hcmask[4];
+} kernel_header_t;
+
 #endif

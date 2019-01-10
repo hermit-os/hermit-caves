@@ -68,6 +68,9 @@
 #include "uhyve-migration.h"
 #include "uhyve-net.h"
 #include "uhyve-gdb.h"
+#ifdef __x86_64__
+#include "uhyve-x86_64.h"
+#endif
 #include "proxy.h"
 
 static bool restart = false;
@@ -91,7 +94,7 @@ uint32_t no_checkpoint = 0;
 uint32_t ncores = 1;
 uint64_t elf_entry;
 int kvm = -1, vmfd = -1, netfd = -1, efd = -1, mig_efd = -1;
-uint8_t* mboot = NULL;
+volatile kernel_header_t* kheader = NULL;
 __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
@@ -887,7 +890,7 @@ int uhyve_loop(int argc, char **argv)
 	}
 #endif
 
-	*((uint32_t*) (mboot+0x24)) = ncores;
+	kheader->possible_cpus = ncores;
 
 	if (ts > 0)
 	{
