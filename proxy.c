@@ -345,7 +345,7 @@ static int qemu_init(char *path)
 		exit(1);
 	}
 	str = strstr(loader_path, "proxy");
-	strncpy(str, "ldhermit.elf", MAX_PATH-strlen(loader_path)+5);
+	strncpy(str, "hermit-loader", MAX_PATH-strlen(loader_path)+5);
 
 	str = getenv("HERMIT_APP_PORT");
 	if (str)
@@ -464,7 +464,7 @@ static int multi_init(char *path)
 #ifdef __aarch64__
 	fprintf(stderr, "The multi-kernel version is currently not supported for aarch64\n");
 	exit(1);
-#endif 
+#endif
 
 	// set path to temporary file
 	snprintf(isle_path, MAX_PATH, "/sys/hermit/isle%d/path", isle_nr);
