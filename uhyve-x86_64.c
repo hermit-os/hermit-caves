@@ -541,7 +541,7 @@ void init_cpu_state(uint64_t elf_entry)
 	struct kvm_msr_entry *msrs = msr_data.entries;
 
 	run->apic_base = APIC_DEFAULT_BASE;
-        setup_cpuid(kvm, vcpufd);
+	setup_cpuid(kvm, vcpufd);
 
 	// be sure that the multiprocessor is runable
 	kvm_ioctl(vcpufd, KVM_SET_MP_STATE, &mp_state);
