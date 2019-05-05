@@ -280,7 +280,7 @@ void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t liste
 	err(1, "Checkpointing is currently not supported!");
 }
 
-void determine_mem_mappings(alloc_list_t *alloc_list)
+void determine_mem_mappings(free_list_t *free_list)
 {
 	err(1, "Currently, uhyve does not dermine the memory mappings for aachr64!");
 }

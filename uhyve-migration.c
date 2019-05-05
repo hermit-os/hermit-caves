@@ -348,6 +348,10 @@ void recv_mem_regions(mem_mappings_t *mem_mappings)
 
 #else
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 /* dummy implementation for aarch64 */
 
 void set_migration_target(const char *ip_str, int port)
@@ -355,6 +359,20 @@ void set_migration_target(const char *ip_str, int port)
 }
 
 void set_migration_type(const char *mig_type_str)
+{
+}
+
+int send_data(void *buffer, size_t length)
+{
+	return 0;
+}
+
+int recv_data(void *buffer, size_t length)
+{
+	return 0;
+}
+
+void set_migration_params(const char *migration_param_filename)
 {
 }
 
