@@ -45,7 +45,7 @@
 #define __HERMIT_read	4
 #define __HERMIT_lseek	5
 
-int uhyve_init(char *path);
+int uhyve_init(char **argv);
 int uhyve_loop(int argc, char **argv);
 
 // define some helper functions

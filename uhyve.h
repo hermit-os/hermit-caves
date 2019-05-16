@@ -31,6 +31,8 @@
 #include <err.h>
 #include <linux/kvm.h>
 
+#define GUEST_OFFSET			0x0
+
 #define UHYVE_PORT_WRITE		0x400
 #define UHYVE_PORT_OPEN			0x440
 #define UHYVE_PORT_CLOSE		0x480

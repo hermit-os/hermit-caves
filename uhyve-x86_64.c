@@ -123,7 +123,6 @@
 
 #define MAX_FNAME       256
 
-#define GUEST_OFFSET		0x0
 #define CPUID_FUNC_PERFMON	0x0A
 #define GUEST_PAGE_SIZE		0x200000   /* 2 MB pages in guest */
 

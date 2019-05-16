@@ -141,7 +141,7 @@ static char* get_append_string(void)
 	return cmdline;
 }
 
-static int env_init(char *path)
+static int env_init(char **argv)
 {
 	char* str;
 	struct sigaction sINT, sTERM;
@@ -190,12 +190,12 @@ static int env_init(char *path)
 
 	if (monitor == QEMU) {
 		atexit(qemu_fini);
-		return qemu_init(path);
+		return qemu_init(argv[1]);
 	} else if (monitor == UHYVE) {
-		return uhyve_init(path);
+		return uhyve_init(argv);
 	} else {
 		atexit(multi_fini);
-		return multi_init(path);
+		return multi_init(argv[1]);
 	}
 }
 
@@ -1043,7 +1043,7 @@ int main(int argc, char **argv)
 		verbose = true;
 	}
 
-	ret = env_init(argv[1]);
+	ret = env_init(argv);
 	if (ret)
 		return ret;
 

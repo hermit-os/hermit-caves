@@ -68,6 +68,7 @@
 #include "uhyve-migration.h"
 #include "uhyve-net.h"
 #include "uhyve-gdb.h"
+#include "uhyve-elf.h"
 #include "proxy.h"
 
 static bool restart = false;
@@ -103,6 +104,10 @@ int uhyve_envc = -1;
 char **uhyve_argv = NULL;
 extern char **environ;
 char **uhyve_envp = NULL;
+
+const char* hermit_tux = NULL;
+char htux_bin[PATH_MAX+1];
+char htux_kernel[PATH_MAX+1];
 
 vcpu_state_t *vcpu_thread_states = NULL;
 static sigset_t   signal_mask;
@@ -678,10 +683,10 @@ void sigterm_handler(int signum)
 	pthread_exit(0);
 }
 
-int uhyve_init(char *path)
+int uhyve_init(char **argv)
 {
 	FILE *f = NULL;
-	guest_path = path;
+	guest_path = argv[1];
 
 	signal(SIGTERM, sigterm_handler);
 
@@ -756,6 +761,21 @@ int uhyve_init(char *path)
 	/* Create the virtual machine */
 	vmfd = kvm_ioctl(kvm, KVM_CREATE_VM, 0);
 
+	hermit_tux = getenv("HERMIT_TUX");
+	if (hermit_tux)
+	{
+		if (argv[2] == NULL) {
+			fprintf(stderr, "Hermitux: linux binary missing\n");
+			exit(EXIT_FAILURE);
+		}
+		strcpy(htux_bin, argv[2]);
+		strcpy(htux_kernel, argv[1]);
+
+		if (verbose) {
+			fprintf(stderr, "Try to start Linux binary %s\n", htux_bin);
+		}
+	}
+
 #ifdef __x86_64__
 	init_kvm_arch();
 	if (restart) {
@@ -767,6 +787,9 @@ int uhyve_init(char *path)
 	} else {
 		if (load_kernel(guest_mem, path) != 0)
 			exit(EXIT_FAILURE);
+		if (hermit_tux)
+			if (uhyve_elf_loader(htux_bin) < 0)
+				exit(EXIT_FAILURE);
 	}
 #endif
 
@@ -884,6 +907,9 @@ int uhyve_loop(int argc, char **argv)
 	} else {
 		if (load_kernel(guest_mem, guest_path) != 0)
 			exit(EXIT_FAILURE);
+		if (hermit_tux)
+			if (uhyve_elf_loader(htux_bin) < 0)
+				exit(EXIT_FAILURE);
 	}
 #endif
 

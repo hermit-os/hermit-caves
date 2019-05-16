@@ -60,8 +60,6 @@
 #include "uhyve.h"
 #include "proxy.h"
 
-#define GUEST_OFFSET		0x0
-
 #define GIC_SPI_IRQ_BASE	32
 #define GICD_BASE		(1ULL << 39)
 #define GICC_BASE		(GICD_BASE + GICD_SIZE)
