@@ -914,6 +914,21 @@ int uhyve_loop(int argc, char **argv)
 #endif
 
 	*((uint32_t*) (mboot+0x24)) = ncores;
+#ifdef __x86_64__
+	*((uint64_t*) (mboot + 0xC0)) = tux_entry;
+	*((uint64_t*) (mboot + 0xC8)) = tux_size;
+	*((uint64_t*) (mboot + 0xE2)) = tux_start_address;
+	*((uint64_t*) (mboot + 0xEA)) = tux_ehdr_phoff;
+	*((uint64_t*) (mboot + 0xF2)) = tux_ehdr_phnum;
+	*((uint64_t*) (mboot + 0xFA)) = tux_ehdr_phentsize;
+#elif defined(__aarch64__)
+	*((uint64_t*) (mboot + 0x200)) = tux_entry;
+	*((uint64_t*) (mboot + 0x208)) = tux_size;
+	*((uint64_t*) (mboot + 0x230)) = tux_start_address;
+	*((uint64_t*) (mboot + 0x238)) = tux_ehdr_phoff;
+	*((uint64_t*) (mboot + 0x240)) = tux_ehdr_phnum;
+	*((uint64_t*) (mboot + 0x248)) = tux_ehdr_phentsize;
+#endif
 
 	if (ts > 0)
 	{
