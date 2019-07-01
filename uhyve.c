@@ -360,50 +360,25 @@ static int vcpu_loop(void)
 					putc((unsigned char) raddr, stderr);
 				break;
 			case UHYVE_PORT_WRITE: {
+					int ret;
 					uhyve_write_t* uhyve_write = (uhyve_write_t*) (guest_mem+raddr);
-					size_t bytes_to_write = uhyve_write->len;
-					size_t bytes_written = 0;
-
-					while (bytes_to_write > 0)
-					{
-						size_t physical_address;
-						size_t physical_address_end;
-						virt_to_phys((size_t)uhyve_write->buf + bytes_written, &physical_address, &physical_address_end);
-
-						size_t bytes_to_write_step = min(physical_address_end - physical_address, bytes_to_write);
-						size_t bytes_written_step = write(uhyve_write->fd, guest_mem+physical_address, bytes_to_write_step);
-						bytes_written += bytes_written_step;
-						if (bytes_written_step < bytes_to_write_step)
-							break;
-
-						bytes_to_write -= bytes_to_write_step;
-					}
-
-					uhyve_write->len = bytes_written;
+					ret = write(uhyve_write->fd, guest_mem+(size_t)uhyve_write->buf, uhyve_write->len);
+					if(ret == -1)
+						uhyve_write->ret = -errno;
+					else
+						uhyve_write->ret = ret;
 					break;
 				}
 
 			case UHYVE_PORT_READ: {
+					int ret;
 					uhyve_read_t* uhyve_read = (uhyve_read_t*) (guest_mem+raddr);
-					size_t bytes_to_read = uhyve_read->len;
-					size_t bytes_read = 0;
 
-					while (bytes_to_read > 0)
-					{
-						size_t physical_address;
-						size_t physical_address_end;
-						virt_to_phys((size_t)uhyve_read->buf + bytes_read, &physical_address, &physical_address_end);
-
-						size_t bytes_to_read_step = min(physical_address_end - physical_address, bytes_to_read);
-						size_t bytes_read_step = read(uhyve_read->fd, guest_mem+physical_address, bytes_to_read_step);
-						bytes_read += bytes_read_step;
-						if (bytes_read_step < bytes_to_read_step)
-							break;
-
-						bytes_to_read -= bytes_to_read_step;
-					}
-
-					uhyve_read->ret = bytes_read;
+					ret = read(uhyve_read->fd, guest_mem+(size_t)uhyve_read->buf, uhyve_read->len);
+					if(ret == -1)
+						uhyve_read->ret = -errno;
+					else
+						uhyve_read->ret = ret;
 					break;
 				}
 
@@ -790,7 +765,6 @@ int uhyve_init(char **argv)
 		if (hermit_tux)
 			if (uhyve_elf_loader(htux_bin) < 0)
 				exit(EXIT_FAILURE);
-	}
 #endif
 
 	pthread_barrier_init(&barrier, NULL, ncores);
