@@ -543,6 +543,18 @@ static int vcpu_loop(void)
 			} else print_registers();
 			exit(EXIT_FAILURE);
 
+#ifdef __x86_64__
+		case UHYVE_PORT_PFAULT: {
+			char addr2line_call[128];
+			uhyve_pfault_t *arg = (uhyve_pfault_t *)(guest_mem + raddr);
+			fprintf(stderr, "GUEST PAGE FAULT @0x%x (RIP @0x%x)\n", arg->addr, arg->rip);
+			sprintf(addr2line_call, "addr2line -a %x -e %s\n", arg->rip,
+				(arg->rip >= tux_start_address) ? htux_bin : htux_kernel);
+			system(addr2line_call);
+			break;
+		}
+#endif
+
 		default:
 			fprintf(stderr, "KVM: unhandled exit: exit_reason = 0x%x\n", run->exit_reason);
 			exit(EXIT_FAILURE);
@@ -754,13 +766,13 @@ int uhyve_init(char **argv)
 #ifdef __x86_64__
 	init_kvm_arch();
 	if (restart) {
-		if (load_checkpoint(guest_mem, path) != 0)
+		if (load_checkpoint(guest_mem, guest_path) != 0)
 			exit(EXIT_FAILURE);
 	} else if (start_mig_server) {
 		load_migration_data(guest_mem);
 		close_migration_channel();
 	} else {
-		if (load_kernel(guest_mem, path) != 0)
+		if (load_kernel(guest_mem, guest_path) != 0)
 			exit(EXIT_FAILURE);
 		if (hermit_tux)
 			if (uhyve_elf_loader(htux_bin) < 0)
@@ -775,7 +787,7 @@ int uhyve_init(char **argv)
 	int ret = vcpu_init();
 
 	const char* netif_str = getenv("HERMIT_NETIF");
-	if (netif_str)
+	if (netif_str && strcmp(netif_str, ""))
 	{
 		// TODO: strncmp for different network interfaces
 		// for example tun/tap device or uhyvetap device
