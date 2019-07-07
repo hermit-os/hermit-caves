@@ -467,10 +467,10 @@ static void convert_to_host_virt(mem_mappings_t *mem_mappings)
 {
 	size_t i = 0;
 	/* convert guest-physical addrees to host-virtual */
-	fprintf(stderr, "[INFO] We have %lu memory chunks\n", mem_mappings->count);
+	fprintf(stderr, "[INFO] We have %zu memory chunks\n", mem_mappings->count);
 	fprintf(stderr, "[INFO] ");
 	for (i=0; i<mem_mappings->count; ++i) {
-		fprintf(stderr, "(ADDR[%lu]: %p, SIZE[%lu]: 0x%zx); ",
+		fprintf(stderr, "(ADDR[%lu]: 0x%p, SIZE[%lu]: 0x%lx); ",
 				i,
 				mem_mappings->mem_chunks[i].ptr,
 				i,
