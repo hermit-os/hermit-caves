@@ -28,33 +28,31 @@
 #ifdef __x86_64__
 #define _GNU_SOURCE
 
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <signal.h>
-#include <limits.h>
-#include <pthread.h>
-#include <semaphore.h>
 #include <elf.h>
 #include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <linux/const.h>
+#include <linux/kvm.h>
 #include <poll.h>
-#include <sys/wait.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
+#include <pthread.h>
+#include <sched.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/time.h>
-#include <sys/eventfd.h>
-#include <linux/const.h>
-#include <linux/kvm.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #ifdef HAVE_MSR_INDEX_H
 #include <asm/msr-index.h>
 #else
@@ -110,13 +108,13 @@
 #endif
 #include <asm/mman.h>
 
-#include "uhyve.h"
+#include "proxy.h"
 #include "uhyve-gdb.h"
-#include "uhyve-x86_64.h"
-#include "uhyve-syscalls.h"
 #include "uhyve-migration.h"
 #include "uhyve-net.h"
-#include "proxy.h"
+#include "uhyve-syscalls.h"
+#include "uhyve-x86_64.h"
+#include "uhyve.h"
 
 // define this macro to create checkpoints with KVM's dirty log
 //#define USE_DIRTY_LOG
@@ -991,7 +989,7 @@ void *migration_handler(void *arg)
 	exit(EXIT_SUCCESS);
 }
 
-int load_migration_data(uint8_t* mem)
+void load_migration_data(uint8_t* mem)
 {
 	size_t paddr = elf_entry;
 	int res = 0;
