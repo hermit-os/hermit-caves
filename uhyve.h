@@ -119,7 +119,7 @@ void write_cpu_state(void);
 void init_cpu_state(uint64_t elf_entry);
 int load_kernel(uint8_t* mem, char* path);
 int load_checkpoint(uint8_t* mem, char* path);
-int load_migration_data(uint8_t* mem);
+void load_migration_data(uint8_t* mem);
 void wait_for_incomming_migration(migration_metadata_t *metadata, uint16_t listen_portno);
 void init_kvm_arch(void);
 int load_kernel(uint8_t* mem, char* path);
