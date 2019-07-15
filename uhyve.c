@@ -413,6 +413,12 @@ static int vcpu_loop(void)
 					break;
 				}
 
+			case UHYVE_PORT_UNLINK: {
+				uhyve_unlink_t* uhyve_unlink = (uhyve_unlink_t*) (guest_mem+raddr);
+				uhyve_unlink->ret = unlink((const char*)guest_mem+(size_t)uhyve_unlink->name);
+				break;
+			}
+
 			case UHYVE_PORT_OPEN: {
 					uhyve_open_t* uhyve_open = (uhyve_open_t*) (guest_mem+raddr);
 					char rpath[PATH_MAX];

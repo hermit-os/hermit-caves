@@ -52,6 +52,7 @@
 #define UHYVE_PORT_CMDVAL		0x780
 
 #define UHYVE_UART_PORT			0x800
+#define UHYVE_PORT_UNLINK		0x840
 
 #define UHYVE_IRQ_BASE            11
 #define UHYVE_IRQ_NET             (UHYVE_IRQ_BASE+0)

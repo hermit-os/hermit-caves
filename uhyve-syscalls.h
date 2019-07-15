@@ -35,6 +35,11 @@ typedef struct {
 } __attribute__((packed)) uhyve_open_t;
 
 typedef struct {
+	const char* name;
+	int ret;
+} __attribute__((packed)) uhyve_unlink_t;
+
+typedef struct {
 	int fd;
 	int ret;
 } __attribute__((packed)) uhyve_close_t;
