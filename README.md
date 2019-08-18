@@ -1,6 +1,8 @@
-# hermit-caves
+# Uhyve - A lightweight hypervisor for the Unikernel HermitCore
 
-This repository contains **uhyve**, the hypervisor to start RustyHermit applications.
+*uhyve* is designed to improve the performance and the scalability of HermitCore / RustyHermit applications.
+In contrast to QEMU, uhyve directly boots in 64 bit mode and does not rely on inter-processor interrupts to boot additional cores.
+The hypervisor is uses [KVM](https://www.linux-kvm.org/) and requires Linux as host system.
 
 ## Dependencies
 
@@ -8,18 +10,22 @@ To build *uhyve* you need following tools:
 
 * x86-based Linux systems
 * Recent host compiler such as GCC
-* CMake	
+* CMake
 * git
 
 ## Build
 
-As a first step please clone this repository
+*Please make sure that you use the correct branch of this repository.*
+
+The `master` branch is designed for [HermitCore](https://github.com/hermitcore/libhermit), whereas the branch `path2rs` is required for [RustyHermit](https://github.com/hermitcore/libhermit-rs).
+
+As a first step please clone this repository. This will clone the uhyve version used for RustyHermit
 
 ```sh
 git clone -b path2rs https://github.com/hermitcore/hermit-caves.git
 ```
 
-and than execute the following commands to build uhyve.
+The build process itself is identical for both uhyve versions:
 
 ```sh
 cd hermit-caves
@@ -28,6 +34,7 @@ cd build
 cmake ..
 make
 ```
+
 This will create an application *proxy* in the working directory.
 Use this application to start the RustyHermit applications.
 
@@ -47,3 +54,16 @@ Setting the environment variable `HERMIT_VERBOSE` to `1` will have uhyve print k
 ```sh
 HERMIT_VERBOSE=1 ./proxy ../../hello_world/target/x86_64-unknown-hermit/debug/hello_world
 ```
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
