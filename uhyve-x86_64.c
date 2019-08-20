@@ -1337,6 +1337,8 @@ int load_kernel(uint8_t* mem, char* path)
 			kheader->uhyve = 1; // announce uhyve
 			if (verbose)
 				kheader->uartport = UHYVE_UART_PORT; // announce uhyve
+			else
+				kheader->uartport = 0;
 
 			char* str = getenv("HERMIT_IP");
 			if (str) {
@@ -1379,6 +1381,9 @@ int load_kernel(uint8_t* mem, char* path)
 		}
 		kheader->image_size = paddr + memsz - pstart; // total kernel size
 	}
+
+	// be sure that the data is written into the memory
+	__asm volatile("mfence":::"memory");
 
 	ret = 0;
 
