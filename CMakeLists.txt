@@ -2,7 +2,12 @@ cmake_minimum_required(VERSION 3.7)
 project(hermit_tools C)
 
 include(CheckIncludeFiles)
-include(../cmake/HermitCore-Paths.cmake)
+include(../cmake/HermitCore-Paths.cmake OPTIONAL)
+
+if(NOT DEFINED MAX_ARGC_ENVC)
+	MESSAGE("MAX_ARGC_ENVC not set. Setting it 128.")
+	set(MAX_ARGC_ENVC 128)
+endif(NOT DEFINED MAX_ARGC_ENVC)
 
 option(ENABLE_RDMA_MIGRATION "Migration support via RDMA" OFF)
 
