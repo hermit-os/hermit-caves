@@ -353,11 +353,13 @@ void init_cpu_state(uint64_t elf_entry)
 		kvm_ioctl(gic_fd, KVM_SET_DEVICE_ATTR, &vgic_init_attr);
 	}
 
+#if 0
 	// only one core is able to enter startup code
 	// => the wait for the predecessor core
 	while (*((volatile uint32_t*) (mboot + 0x120)) < cpuid)
 		pthread_yield();
 	*((volatile uint32_t*) (mboot + 0x130)) = cpuid;
+#endif
 }
 
 /* Return 1 if guest fiqs are enabled, 0 if the aren't */
@@ -527,7 +529,7 @@ int load_kernel(uint8_t* mem, char* path)
 	    || hdr.e_ident[EI_MAG2] != ELFMAG2
 	    || hdr.e_ident[EI_MAG3] != ELFMAG3
 	    || hdr.e_ident[EI_CLASS] != ELFCLASS64
-	    || hdr.e_ident[EI_OSABI] != HERMIT_ELFOSABI
+	    /*|| hdr.e_ident[EI_OSABI] != HERMIT_ELFOSABI*/
 	    || hdr.e_type != ET_EXEC || hdr.e_machine != EM_AARCH64) {
 		fprintf(stderr, "Invalid HermitCore file!\n");
 		ret = -1;
@@ -580,6 +582,7 @@ int load_kernel(uint8_t* mem, char* path)
 			mboot = mem+paddr-GUEST_OFFSET;
 		//fprintf(stderr, "mboot at %p, klog at %p\n", mboot, klog);
 
+#if 0
 		if (!pstart) {
 			pstart = paddr;
 
@@ -629,6 +632,7 @@ int load_kernel(uint8_t* mem, char* path)
 				*((uint32_t*) (mem+paddr-GUEST_OFFSET + 0x174)) = (uint32_t) UHYVE_UART_PORT;
 		}
 		*((uint64_t*) (mem+pstart-GUEST_OFFSET + 0x158)) = paddr + memsz - pstart; // total kernel size
+#endif
 	}
 
 	ret = 0;
