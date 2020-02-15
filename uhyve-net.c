@@ -30,10 +30,23 @@
  */
 
 #include "uhyve-net.h"
+#include <time.h>
 #include <ctype.h>
 
 /* TODO: create an array or equal for more then one netif */
-static uhyve_netinfo_t netinfo;
+static char guest_mac[6];
+
+static inline uint8_t dehex(char c)
+{
+	if (c >= '0' && c <= '9')
+		return (c - '0');
+	else if (c >= 'a' && c <= 'f')
+		return 10 + (c - 'a');
+	else if (c >= 'A' && c <= 'F')
+		return 10 + (c - 'A');
+	else
+		return 0;
+}
 
 //-------------------------------------- ATTACH LINUX TAP -----------------------------------------//
 int attach_linux_tap(const char *dev)
@@ -50,7 +63,7 @@ int attach_linux_tap(const char *dev)
 		return fd;
 	}
 
-	fd = open("/dev/net/tun", O_RDWR | O_NONBLOCK);
+	fd = open("/dev/net/tun", O_RDWR);
 
 	// Initialize interface request for TAP interface
 	memset(&ifr, 0x00, sizeof(ifr));
@@ -109,15 +122,15 @@ int attach_linux_tap(const char *dev)
 //---------------------------------- GET MAC ----------------------------------------------//
 char* uhyve_get_mac(void)
 {
-	return netinfo.mac_str;
+	return guest_mac;
 }
 
 //---------------------------------- SET MAC ----------------------------------------------//
 
 int uhyve_set_mac(void)
 {
+	char guest_mac_str[20];
 	int mac_is_set = 0;
-	uint8_t guest_mac[6];
 
 	char* str = getenv("HERMIT_NETIF_MAC");
 	if (str)
@@ -141,7 +154,13 @@ int uhyve_set_mac(void)
 		if (i != 12 || s != 5) {
 			warnx("Malformed mac address: %s\n", macptr);
 		} else {
-			snprintf(netinfo.mac_str, sizeof(netinfo.mac_str), "%s", macptr);
+			snprintf(guest_mac_str, sizeof(guest_mac_str), "%s", macptr);
+			char* hermit_mac = guest_mac_str;
+			for (i=0; i < 6; i++) {
+				guest_mac[i] = dehex(*hermit_mac++) << 4;
+				guest_mac[i] |= dehex(*hermit_mac++);
+				hermit_mac++;
+			}
 			mac_is_set = 1;
 		}
 	}
@@ -158,12 +177,17 @@ int uhyve_set_mac(void)
 
 		guest_mac[0] &= 0xfe;	// creats a random MAC-address in the locally administered
 		guest_mac[0] |= 0x02;	// address range which can be used without conflict with other public devices
-		// save the MAC address in the netinfo
-		snprintf(netinfo.mac_str, sizeof(netinfo.mac_str),
-			 "%02x:%02x:%02x:%02x:%02x:%02x",
-	                 guest_mac[0], guest_mac[1], guest_mac[2],
-			 guest_mac[3], guest_mac[4], guest_mac[5]);
+		// create MAC address as string
+		memset(guest_mac_str, 0x00, sizeof(guest_mac_str));
+		snprintf(guest_mac_str, sizeof(guest_mac_str),
+			"%02x:%02x:%02x:%02x:%02x:%02x",
+			guest_mac[0] & 0xFF, guest_mac[1] & 0xFF, guest_mac[2] & 0xFF,
+			guest_mac[3] & 0xFF, guest_mac[4] & 0xFF, guest_mac[5] & 0xFF);
 	}
+
+#if 0
+		fprintf(stderr, "MAC address: %s\n", guest_mac_str);
+#endif
 
 	return 0;
 }

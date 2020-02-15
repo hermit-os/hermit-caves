@@ -21,38 +21,38 @@
 #include <sys/ioctl.h>
 #include <err.h>
 
+#define SHAREDQUEUE_START       0x80000
+#define UHYVE_NET_MTU           1500
+#define UHYVE_QUEUE_SIZE        8
+
+#define SHAREDQUEUE_FLOOR(x)	((x) & !0x3f)
+#define SHAREDQUEUE_CEIL(x)		(((x) + 0x3f) & ~0x3f)
+
 extern int netfd;
 
-// UHYVE_PORT_NETINFO
-typedef struct {
-	/* OUT */
-	char mac_str[18];
-} __attribute__((packed)) uhyve_netinfo_t;
+typedef struct { volatile uint64_t counter; } atomic_uint64_t __attribute__ ((aligned (64)));
 
-// UHYVE_PORT_NETWRITE
-typedef struct {
-	/* IN */
-	const void* data;
-	size_t len;
-	/* OUT */
-	int ret;
-} __attribute__((packed)) uhyve_netwrite_t;
+inline static uint64_t atomic_uint64_read(atomic_uint64_t *d) {
+	return d->counter;
+}
 
-// UHYVE_PORT_NETREAD
-typedef struct {
-        /* IN */
-	void* data;
-        /* IN / OUT */
-	size_t len;
-	/* OUT */
-	int ret;
-} __attribute__((packed)) uhyve_netread_t;
+inline static int64_t atomic_uint64_inc(atomic_uint64_t* d) {
+	uint64_t res = 1;
+	__asm__ volatile("lock xaddq %0, %1" : "+r"(res), "+m"(d->counter) : : "memory", "cc");
+	return ++res;
+}
 
-// UHYVE_PORT_NETSTAT
-typedef struct {
-        /* IN */
-        int status;
-} __attribute__((packed)) uhyve_netstat_t;
+typedef struct queue_inner {
+	uint16_t len;
+	uint8_t data[UHYVE_NET_MTU+34];
+} queue_inner_t;
+
+typedef struct shared_queue {
+	atomic_uint64_t read;
+	atomic_uint64_t written;
+	uint8_t reserved[64-8];
+	queue_inner_t inner[UHYVE_QUEUE_SIZE];
+} shared_queue_t;
 
 int uhyve_net_init(const char *hermit_netif);
 char* uhyve_get_mac(void);

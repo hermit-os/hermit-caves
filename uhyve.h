@@ -31,6 +31,8 @@
 #include <err.h>
 #include <linux/kvm.h>
 
+#define KERNEL_STACK_SIZE		32768
+
 #define UHYVE_PORT_WRITE		0x400
 #define UHYVE_PORT_OPEN			0x440
 #define UHYVE_PORT_CLOSE		0x480
@@ -39,12 +41,12 @@
 #define UHYVE_PORT_LSEEK		0x580
 
 // Networkports
-#define UHYVE_PORT_NETINFO              0x600
-#define UHYVE_PORT_NETWRITE             0x640
-#define UHYVE_PORT_NETREAD              0x680
-#define UHYVE_PORT_NETSTAT              0x700
+#define UHYVE_PORT_NETINFO		0x600
+#define UHYVE_PORT_NETWRITE		0x640
+#define UHYVE_PORT_NETREAD		0x680
+#define UHYVE_PORT_NETSTAT		0x700
 
-#define UHYVE_PORT_FREELIST 		0x720
+#define UHYVE_PORT_FREELIST		0x720
 
 /* Ports and data structures for uhyve command line arguments and envp
  * forwarding */
@@ -54,9 +56,9 @@
 #define UHYVE_UART_PORT			0x800
 #define UHYVE_PORT_UNLINK		0x840
 
-#define UHYVE_IRQ_BASE            11
-#define UHYVE_IRQ_NET             (UHYVE_IRQ_BASE+0)
-#define UHYVE_IRQ_MIGRATION       (UHYVE_IRQ_BASE+1)
+#define UHYVE_IRQ_BASE			11
+#define UHYVE_IRQ_NET			(UHYVE_IRQ_BASE+0)
+#define UHYVE_IRQ_MIGRATION		(UHYVE_IRQ_BASE+1)
 
 #define SIGTHRCHKP 	(SIGRTMIN+0)
 #define SIGTHRMIG 	(SIGRTMIN+1)

@@ -354,7 +354,7 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
 	uint64_t *pml4 = (uint64_t *) (mem + BOOT_PML4);
 	uint64_t *pdpte = (uint64_t *) (mem + BOOT_PDPTE);
 	uint64_t *pde = (uint64_t *) (mem + BOOT_PDE);
-	uint64_t paddr;
+	uint64_t paddr, i;
 
 	/*
 	 * For simplicity we currently use 2MB pages and only a single
@@ -365,11 +365,11 @@ static void setup_system_page_tables(struct kvm_sregs *sregs, uint8_t *mem)
 	memset(pdpte, 0x00, 4096);
 	memset(pde, 0x00, 4096);
 
-	*pml4 = BOOT_PDPTE | (X86_PDPT_P | X86_PDPT_RW);
+	pml4[0] = BOOT_PDPTE | (X86_PDPT_P | X86_PDPT_RW);
 	pml4[511] = BOOT_PML4 | (X86_PDPT_P | X86_PDPT_RW);
-	*pdpte = BOOT_PDE | (X86_PDPT_P | X86_PDPT_RW);
-	for (paddr = 0; paddr < 0x20000000ULL; paddr += GUEST_PAGE_SIZE, pde++)
-		*pde = paddr | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
+	pdpte[0] = BOOT_PDE | (X86_PDPT_P | X86_PDPT_RW);
+	for (paddr = 0, i = 0; i < 512; paddr += GUEST_PAGE_SIZE, i++)
+		pde[i] = paddr | (X86_PDPT_P | X86_PDPT_RW | X86_PDPT_PS);
 
 	sregs->cr3 = BOOT_PML4;
 	sregs->cr4 |= X86_CR4_PAE;
@@ -529,6 +529,7 @@ void init_cpu_state(uint64_t elf_entry)
 {
 	struct kvm_regs regs = {
 		.rip = elf_entry,	// entry point to HermitCore
+		.rdi = BOOT_INFO_ADDR, // location of the boot info
 		.rflags = 0x2,		// POR value required by x86 architecture
 	};
 	struct kvm_mp_state mp_state = { KVM_MP_STATE_RUNNABLE };
@@ -1297,6 +1298,15 @@ int load_kernel(uint8_t* mem, char* path)
 	if (ret < 0)
 		goto out;
 
+	if (!kheader) {
+		// Initialize boot header
+		kheader = (volatile kernel_header_t*) (mem+BOOT_INFO_ADDR-GUEST_OFFSET);
+		memset((void*)kheader, 0x00, sizeof(kernel_header_t));
+		kheader->magic_number = 0xC0DECAFE;
+		kheader->version = 1;
+		kheader->single_kernel = 1;
+	}
+
 	/*
 	 * Load all segments with type "LOAD" from the file at offset
 	 * p_offset, and copy that into in memory.
@@ -1308,7 +1318,11 @@ int load_kernel(uint8_t* mem, char* path)
 		size_t filesz = phdr[ph_i].p_filesz;
 		size_t memsz = phdr[ph_i].p_memsz;
 
-		if (phdr[ph_i].p_type != PT_LOAD)
+		if (phdr[ph_i].p_type == PT_TLS) {
+			kheader->tls_start = paddr;
+			kheader->tls_filesz = filesz;
+			kheader->tls_memsz = memsz;
+		} else if (phdr[ph_i].p_type != PT_LOAD)
 			continue;
 
 		//printf("Kernel location 0x%zx, file size 0x%zx, memory size 0x%zx\n", paddr, filesz, memsz);
@@ -1318,8 +1332,6 @@ int load_kernel(uint8_t* mem, char* path)
 			goto out;
 		if (!klog)
 			klog = mem+paddr+0x5000-GUEST_OFFSET;
-		if (!kheader)
-			kheader = (volatile kernel_header_t*) (mem+paddr-GUEST_OFFSET);
 
 		if (!pstart) {
 			pstart = paddr;
@@ -1328,7 +1340,7 @@ int load_kernel(uint8_t* mem, char* path)
 			//fprintf(stderr, "Magic number: 0x%x, version %d\n",
 			//	kheader->magic_number, kheader->version);
 
-			kheader->current_stack_address = paddr+sizeof(kernel_header_t);
+			kheader->current_stack_address = pstart - KERNEL_STACK_SIZE;
 			kheader->base = paddr; // physical start address
 			kheader->limit = guest_size;   // physical limit
 			kheader->cpu_freq = get_cpufreq();

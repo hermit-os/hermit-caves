@@ -1,6 +1,8 @@
 #ifndef __UHYVE_CPU_H__
 #define __UHYVE_CPU_H__
 
+#define BOOT_INFO_ADDR  0x9000ULL
+
 #ifndef _BITUL
 
 #ifdef __ASSEMBLY__
@@ -101,6 +103,9 @@ typedef struct kernel_header {
 	uint64_t base;
 	uint64_t limit;
 	uint64_t image_size;
+    uint64_t tls_start;
+    uint64_t tls_filesz;
+    uint64_t tls_memsz;
 	uint64_t current_stack_address;
 	uint64_t current_percore_address;
 	uint64_t host_logical_addr;

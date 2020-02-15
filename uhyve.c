@@ -75,7 +75,7 @@
 
 static bool restart = false;
 static bool migration = false;
-static pthread_t net_thread;
+static pthread_t rx_thread, tx_thread;
 static int* vcpu_fds = NULL;
 static pthread_mutex_t kvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -98,7 +98,7 @@ volatile kernel_header_t* kheader = NULL;
 __thread struct kvm_run *run = NULL;
 __thread int vcpufd = -1;
 __thread uint32_t cpuid = 0;
-static sem_t net_sem;
+static sem_t tx_sem;
 sem_t mig_sem;
 
 int uhyve_argc = -1;
@@ -194,8 +194,10 @@ static void uhyve_exit(void* arg)
 			pthread_kill(vcpu_threads[i], SIGTERM);
 		}
 
-		if (netfd > 0)
-			pthread_kill(net_thread, SIGTERM);
+		if (netfd > 0) {
+			pthread_kill(rx_thread, SIGTERM);
+			pthread_kill(tx_thread, SIGTERM);
+		}
 	}
 
 	close_fd(&vcpufd);
@@ -223,28 +225,70 @@ static void uhyve_atexit(void)
 	close_fd(&kvm);
 }
 
-static void* wait_for_packet(void* arg)
+static void* recieve_packets(void* arg)
 {
-	int ret;
-	struct pollfd fds = {	.fd = netfd,
-				.events = POLLIN,
-				.revents  = 0};
+	shared_queue_t* rx_queue = (shared_queue_t*) (SHAREDQUEUE_START+guest_mem);
+	uint64_t read_counter, written_counter, distance, idx;
+	ssize_t ret;
 
-	while(1)
+	while (1)
 	{
-		fds.revents = 0;
+		while (1) {
+			read_counter = atomic_uint64_read(&rx_queue->read);
+			written_counter = atomic_uint64_read(&rx_queue->written);
+			distance = written_counter - read_counter;
+			if (distance < UHYVE_QUEUE_SIZE)
+				break;
+			else
+				sched_yield();
+		}
 
-		ret = poll(&fds, 1, -1000);
+		idx = written_counter % UHYVE_QUEUE_SIZE;
+		ret = read(netfd, rx_queue->inner[idx].data, UHYVE_NET_MTU);
+		if (ret > 0) {
+			rx_queue->inner[idx].len = ret;
+			atomic_uint64_inc(&rx_queue->written);
+		}
 
-		if (ret < 0 && errno == EINTR)
-			continue;
-
-		if (ret < 0)
-			perror("poll()");
-		else if (ret) {
+		if (atomic_uint64_read(&rx_queue->read) == written_counter) {
 			uint64_t event_counter = 1;
 			write(efd, &event_counter, sizeof(event_counter));
-			sem_wait(&net_sem);
+		}
+	}
+
+	return NULL;
+}
+
+static void* transfer_packets(void* arg) {
+	shared_queue_t* tx_queue = (shared_queue_t*) (SHAREDQUEUE_START+guest_mem+SHAREDQUEUE_CEIL(sizeof(shared_queue_t)));
+	uint64_t read_counter, written_counter, distance, idx;
+	ssize_t ret;
+
+	while (1) {
+		sem_wait(&tx_sem);
+
+		read_counter = atomic_uint64_read(&tx_queue->read);
+		written_counter = atomic_uint64_read(&tx_queue->written);
+		distance = written_counter - read_counter;
+
+		while (distance > 0)
+		{
+			idx = read_counter % UHYVE_QUEUE_SIZE;
+			ssize_t len = tx_queue->inner[idx].len;
+
+			if (len >= UHYVE_NET_MTU) {
+				fprintf(stderr, "Drop message. Message is too large.\n");
+			} else {
+				for (ssize_t i = 0; i < len; ) {
+					ret = write(netfd, tx_queue->inner[idx].data+i, len-i);
+					if (ret > 0)
+						i += ret;
+				}
+			}
+
+			read_counter = atomic_uint64_inc(&tx_queue->read);
+			written_counter = atomic_uint64_read(&tx_queue->written);
+			distance = written_counter - read_counter;
 		}
 	}
 
@@ -262,9 +306,11 @@ static inline void check_network(void)
 		irqfd.gsi = UHYVE_IRQ_NET;
 		kvm_ioctl(vmfd, KVM_IRQFD, &irqfd);
 
-		sem_init(&net_sem, 1, 0);
+		sem_init(&tx_sem, 0, 1);
 
-		if (pthread_create(&net_thread, NULL, wait_for_packet, NULL))
+		if (pthread_create(&rx_thread, NULL, recieve_packets, NULL))
+			err(1, "unable to create thread");
+		if (pthread_create(&tx_thread, NULL, transfer_packets, NULL))
 			err(1, "unable to create thread");
 	}
 }
@@ -444,47 +490,15 @@ static int vcpu_loop(void)
 				}
 
 			case UHYVE_PORT_NETINFO: {
-					uhyve_netinfo_t* uhyve_netinfo = (uhyve_netinfo_t*)(guest_mem+raddr);
-					memcpy(uhyve_netinfo->mac_str, uhyve_get_mac(), 18);
+					char* mac = (char*)(guest_mem+raddr);
+					memcpy(mac, uhyve_get_mac(), 6);
 					// guest configure the ethernet device => start network thread
 					check_network();
 					break;
 				}
 
 			case UHYVE_PORT_NETWRITE: {
-					uhyve_netwrite_t* uhyve_netwrite = (uhyve_netwrite_t*)(guest_mem + raddr);
-					size_t len=0;
-					while(len < uhyve_netwrite->len) {
-						ret = write(netfd, guest_mem + (size_t)uhyve_netwrite->data + len, uhyve_netwrite->len - len);
-						if (ret > 0)
-							len += ret;
-
-					}
-					uhyve_netwrite->ret = 0;
-					uhyve_netwrite->len = len;
-					break;
-				}
-
-			case UHYVE_PORT_NETREAD: {
-					uhyve_netread_t* uhyve_netread = (uhyve_netread_t*)(guest_mem + raddr);
-					ret = read(netfd, guest_mem + (size_t)uhyve_netread->data, uhyve_netread->len);
-					if (ret > 0) {
-						uhyve_netread->len = ret;
-						uhyve_netread->ret = 0;
-					} else {
-						uhyve_netread->ret = -1;
-						sem_post(&net_sem);
-					}
-					break;
-				}
-
-			case UHYVE_PORT_NETSTAT: {
-					uhyve_netstat_t* uhyve_netstat = (uhyve_netstat_t*)(guest_mem + raddr);
-					char* str = getenv("HERMIT_NETIF");
-					if (str)
-						uhyve_netstat->status = 1;
-					else
-						uhyve_netstat->status = 0;
+					sem_post(&tx_sem);
 					break;
 				}
 
