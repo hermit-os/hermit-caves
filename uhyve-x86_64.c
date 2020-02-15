@@ -1387,8 +1387,8 @@ int load_kernel(uint8_t* mem, char* path)
 			kheader->host_logical_addr = (uint64_t)guest_mem;
 
 			// Pass the boot time in microseconds (boot_gtod) to HermitCore-rs.
-			struct timeval tv;
-			gettimeofday(&tv, NULL);
+			struct timespec tv;
+			clock_gettime(CLOCK_REALTIME, &tv);
 			kheader->boot_gtod = (uint64_t)tv.tv_sec * 1000000;
 		}
 		kheader->image_size = paddr + memsz - pstart; // total kernel size
