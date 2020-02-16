@@ -61,9 +61,9 @@
 #define BUF_LEN		(1024 * (EVENT_SIZE + 16))
 
 #if 0
-#define PROXY_DEBUG(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__);
+#define UHYVE_DEBUG(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__);
 #else
-#define PROXY_DEBUG(fmt, ...) {}
+#define UHYVE_DEBUG(fmt, ...) {}
 #endif
 
 bool verbose = false;
