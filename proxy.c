@@ -383,7 +383,7 @@ static int qemu_init(char *path)
 			;
 
 		qemu_argv[i] = "-cpu";
-		qemu_argv[i+1] = "Haswell-noTSX";
+		qemu_argv[i+1] = "qemu64,apic,fsgsbase,rdtscp,xsave,fxsr";
 	}
 
 	str = getenv("HERMIT_MONITOR");
