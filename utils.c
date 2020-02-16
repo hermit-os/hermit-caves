@@ -34,7 +34,7 @@
 #include <errno.h>
 #include <limits.h>
 
-#include "proxy.h"
+#include "uhyve-common.h"
 
 #ifdef __x86_64__
 inline static void __cpuid(uint32_t code, uint32_t* a, uint32_t* b, uint32_t* c, uint32_t* d)

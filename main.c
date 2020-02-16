@@ -47,7 +47,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "proxy.h"
+#include "uhyve-common.h"
 
 #define MAX_PATH	255
 #define MAX_ARGS	1024
@@ -114,7 +114,7 @@ static int env_init(char *path)
 
 /*
  * in principle, HermitCore forwards basic system calls to
- * this proxy, which mapped these call to Linux system calls.
+ * this hypervisor, which mapped these call to Linux system calls.
  */
 int handle_syscalls(int s)
 {
@@ -174,7 +174,7 @@ int handle_syscalls(int s)
 
 			buff = malloc(len);
 			if (!buff) {
-				fprintf(stderr,"Proxy: not enough memory");
+				fprintf(stderr,"Uhyve: not enough memory");
 				return 1;
 			}
 
@@ -404,7 +404,7 @@ int handle_syscalls(int s)
 			break;
 		}
 		default:
-			fprintf(stderr, "Proxy: invalid syscall number %d, errno %d, ret %zd\n", sysnr, errno, sret);
+			fprintf(stderr, "Uhyve: invalid syscall number %d, errno %d, ret %zd\n", sysnr, errno, sret);
 			close(s);
 			exit(1);
 			break;
@@ -412,153 +412,8 @@ int handle_syscalls(int s)
 	}
 
 out:
-	perror("Proxy -- communication error");
+	perror("Uhyve -- communication error");
 
-	return 1;
-}
-
-int socket_loop(int argc, char **argv)
-{
-	int i, j, ret, s;
-	int32_t magic = HERMIT_MAGIC;
-	struct sockaddr_in serv_name;
-
-#if 0
-	// check if mmnif interface is available
-	if (!qemu) {
-		struct ifreq ethreq;
-
-		memset(&ethreq, 0, sizeof(ethreq));
-		strncpy(ethreq.ifr_name, "mmnif", IFNAMSIZ);
-
-		while(1) {
-			/* this socket doesn't really matter, we just need a descriptor
-			 * to perform the ioctl on */
-			s = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-			ioctl(s, SIOCGIFFLAGS, &ethreq);
-			close(s);
-
-			if (ethreq.ifr_flags & (IFF_UP|IFF_RUNNING))
-				break;
-		}
-		sched_yield();
-	}
-#endif
-
-	/* create a socket */
-	s = socket(PF_INET, SOCK_STREAM, 0);
-	if (s < 0)
-	{
-		perror("Proxy: socket creation error");
-		exit(1);
-	}
-
-	setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *) &sobufsize, sizeof(sobufsize));
-	setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *) &sobufsize, sizeof(sobufsize));
-	i = 1;
-	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char *) &i, sizeof(i));
-	i = 0;
-	setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (char *) &i, sizeof(i));
-
-	/* server address  */
-	memset((char *) &serv_name, 0x00, sizeof(serv_name));
-	serv_name.sin_family = AF_INET;
-	serv_name.sin_addr = HERMIT_IP(0);
-	serv_name.sin_port = htons(port);
-
-	i = 0;
-retry:
-	ret = connect(s, (struct sockaddr*)&serv_name, sizeof(serv_name));
-	if (ret < 0)
-	{
-		i++;
-		if (i <= 10) {
-			usleep(10000);
-			goto retry;
-		}
-		perror("Proxy -- connection error");
-		close(s);
-		exit(1);
-	}
-
-	ret = write(s, &magic, sizeof(magic));
-	if (ret < 0)
-		goto out;
-
-	// forward program arguments to HermitCore
-	// argv[0] is path of this proxy so we strip it
-
-	argv++;
-	argc--;
-
-	ret = write(s, &argc, sizeof(argc));
-	if (ret < 0)
-		goto out;
-
-	for(i=0; i<argc; i++)
-	{
-		int len = strlen(argv[i])+1;
-
-		j = 0;
-		while (j < sizeof(len))
-		{
-			ret = write(s, ((char*)&len)+j, sizeof(len)-j);
-			if (ret < 0)
-				goto out;
-			j += ret;
-		}
-
-		j = 0;
-		while (j < len)
-		{
-			ret = write(s, argv[i]+j, len-j);
-			if (ret < 0)
-				goto out;
-			j += ret;
-		}
-	}
-
-	// send environment
-	i = 0;
-	while(environ[i])
-		i++;
-
-	ret = write(s, &i, sizeof(i));
-	if (ret < 0)
-		goto out;
-
-	for(i=0; environ[i] ;i++)
-	{
-		int len = strlen(environ[i])+1;
-
-		j = 0;
-		while (j < sizeof(len))
-		{
-			ret = write(s, ((char*)&len)+j, sizeof(len)-j);
-			if (ret < 0)
-				goto out;
-			j += ret;
-		}
-
-		j = 0;
-		while (j < len)
-		{
-			ret = write(s, environ[i]+j, len-j);
-			if (ret < 0)
-				goto out;
-			j += ret;
-		}
-	}
-
-	ret = handle_syscalls(s);
-
-	close(s);
-
-	return ret;
-
-out:
-	perror("Proxy -- communication error");
-	close(s);
 	return 1;
 }
 
@@ -568,7 +423,7 @@ int main(int argc, char **argv)
 
 	char* v = getenv("HERMIT_VERBOSE");
 	if (v && (strcmp(v, "0") != 0)) {
-		//fprintf(stderr, "Start proxy in verbose mode\n");
+		//fprintf(stderr, "Start hypervisor in verbose mode\n");
 		verbose = true;
 	}
 

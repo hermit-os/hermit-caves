@@ -55,7 +55,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "proxy.h"
+#include "uhyve-common.h"
 #include "uhyve.h"
 
 #define GUEST_OFFSET		0x0

@@ -15,7 +15,7 @@ option(ENABLE_RDMA_MIGRATION "Migration support via RDMA" OFF)
 add_compile_options(-std=c99)
 
 list(APPEND LIBS "-pthread")
-set(SRC proxy.c
+set(SRC main.c
 	utils.c
 	uhyve.c
 	uhyve-net.c

@@ -71,7 +71,7 @@
 #ifdef __x86_64__
 #include "uhyve-x86_64.h"
 #endif
-#include "proxy.h"
+#include "uhyve-common.h"
 
 static bool restart = false;
 static bool migration = false;
@@ -824,7 +824,7 @@ int uhyve_loop(int argc, char **argv)
 	if (hermit_debug && (atoi(hermit_debug) != 0))
 		uhyve_gdb_enabled = true;
 
-	/* argv[0] is 'proxy', do not count it */
+	/* argv[0] is 'uhyve', do not count it */
 	uhyve_argc = argc-1;
 	uhyve_argv = &argv[1];
 	uhyve_envp = environ;

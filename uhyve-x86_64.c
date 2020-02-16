@@ -108,7 +108,7 @@
 #endif
 #include <asm/mman.h>
 
-#include "proxy.h"
+#include "uhyve-common.h"
 #include "uhyve-gdb.h"
 #include "uhyve-migration.h"
 #include "uhyve-net.h"

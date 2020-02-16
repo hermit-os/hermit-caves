@@ -35,7 +35,7 @@ cmake ..
 make
 ```
 
-This will create an application *proxy* in the working directory.
+This will create an application *uhyve* in the working directory.
 Use this application to start the RustyHermit applications.
 
 ## Usage
@@ -46,13 +46,13 @@ By default, uhyve will use one core and 512 MiB RAM.
 For instance, the following command starts the demo application with 4 cores and 8 GiB memory:
 
 ```sh
-HERMIT_CPUS=4 HERMIT_MEM=8G ./proxy ../../hello_world/target/x86_64-unknown-hermit/debug/hello_world
+HERMIT_CPUS=4 HERMIT_MEM=8G ./uhyve ../../hello_world/target/x86_64-unknown-hermit/debug/hello_world
 ```
 
 Setting the environment variable `HERMIT_VERBOSE` to `1` will have uhyve print kernel log messages to the terminal.
 
 ```sh
-HERMIT_VERBOSE=1 ./proxy ../../hello_world/target/x86_64-unknown-hermit/debug/hello_world
+HERMIT_VERBOSE=1 ./uhyve ../../hello_world/target/x86_64-unknown-hermit/debug/hello_world
 ```
 
 ## License

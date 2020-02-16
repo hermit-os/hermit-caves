@@ -25,8 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __PROXY_H__
-#define __PROXY_H__
+#ifndef __UHYVE_COMMON_H__
+#define __UHYVE_COMMON_H__
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
