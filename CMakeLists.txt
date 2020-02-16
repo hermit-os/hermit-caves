@@ -41,13 +41,13 @@ if(HAVE_MSR_INDEX_H)
 add_definitions(-DHAVE_MSR_INDEX_H=1)
 endif()
 
-add_executable(proxy ${SRC})
+add_executable(uhyve ${SRC})
 
-target_compile_options(proxy PUBLIC ${LIBS})
-target_compile_options(proxy PUBLIC -DMAX_ARGC_ENVC=${MAX_ARGC_ENVC})
-target_link_libraries(proxy ${LIBS})
+target_compile_options(uhyve PUBLIC ${LIBS})
+target_compile_options(uhyve PUBLIC -DMAX_ARGC_ENVC=${MAX_ARGC_ENVC})
+target_link_libraries(uhyve ${LIBS})
 
-install(TARGETS proxy
+install(TARGETS uhyve
 	DESTINATION bin)
 
 # Show include files in IDE
