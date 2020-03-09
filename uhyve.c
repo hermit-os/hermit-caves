@@ -229,6 +229,7 @@ static void* recieve_packets(void* arg)
 {
 	shared_queue_t* rx_queue = (shared_queue_t*) (SHAREDQUEUE_START+guest_mem);
 	uint64_t read_counter, written_counter, distance, idx;
+	uint64_t event_counter = 1;
 	ssize_t ret;
 
 	while (1)
@@ -248,10 +249,6 @@ static void* recieve_packets(void* arg)
 		if (ret > 0) {
 			rx_queue->inner[idx].len = ret;
 			atomic_uint64_inc(&rx_queue->written);
-		}
-
-		if (atomic_uint64_read(&rx_queue->read) == written_counter) {
-			uint64_t event_counter = 1;
 			write(efd, &event_counter, sizeof(event_counter));
 		}
 	}
@@ -271,8 +268,7 @@ static void* transfer_packets(void* arg) {
 		written_counter = atomic_uint64_read(&tx_queue->written);
 		distance = written_counter - read_counter;
 
-		while (distance > 0)
-		{
+		if (distance > 0) {
 			idx = read_counter % UHYVE_QUEUE_SIZE;
 			ssize_t len = tx_queue->inner[idx].len;
 
@@ -286,9 +282,7 @@ static void* transfer_packets(void* arg) {
 				}
 			}
 
-			read_counter = atomic_uint64_inc(&tx_queue->read);
-			written_counter = atomic_uint64_read(&tx_queue->written);
-			distance = written_counter - read_counter;
+			atomic_uint64_inc(&tx_queue->read);
 		}
 	}
 
