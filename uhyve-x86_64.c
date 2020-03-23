@@ -1220,23 +1220,6 @@ void init_kvm_arch(void)
 	kvm_ioctl(vmfd, KVM_ENABLE_CAP, &cap);
 #endif
 
-	// initialited IOAPIC with HermitCore's default settings
-	struct kvm_irqchip chip;
-	chip.chip_id = KVM_IRQCHIP_IOAPIC;
-	kvm_ioctl(vmfd, KVM_GET_IRQCHIP, &chip);
-	for(int i=0; i<KVM_IOAPIC_NUM_PINS; i++) {
-		chip.chip.ioapic.redirtbl[i].fields.vector = 0x20+i;
-		chip.chip.ioapic.redirtbl[i].fields.delivery_mode = 0;
-		chip.chip.ioapic.redirtbl[i].fields.dest_mode = 0;
-		chip.chip.ioapic.redirtbl[i].fields.delivery_status = 0;
-		chip.chip.ioapic.redirtbl[i].fields.polarity = 0;
-		chip.chip.ioapic.redirtbl[i].fields.remote_irr = 0;
-		chip.chip.ioapic.redirtbl[i].fields.trig_mode = 0;
-		chip.chip.ioapic.redirtbl[i].fields.mask = i != 2 ? 0 : 1;
-		chip.chip.ioapic.redirtbl[i].fields.dest_id = 0;
-	}
-	kvm_ioctl(vmfd, KVM_SET_IRQCHIP, &chip);
-
 	// try to detect KVM extensions
 	cap_tsc_deadline = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_TSC_DEADLINE_TIMER) <= 0 ? false : true;
 	cap_irqchip = kvm_ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_IRQCHIP) <= 0 ? false : true;
