@@ -1344,6 +1344,11 @@ int load_kernel(uint8_t* mem, char* path)
 				kheader->hcip[1] = (uint8_t) ip[1];
 				kheader->hcip[2] = (uint8_t) ip[2];
 				kheader->hcip[3] = (uint8_t) ip[3];
+			} else {
+				kheader->hcip[0] = 0xff;
+				kheader->hcip[1] = 0xff;
+				kheader->hcip[2] = 0xff;
+				kheader->hcip[3] = 0xff;
 			}
 
 			str = getenv("HERMIT_GATEWAY");
